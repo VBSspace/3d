@@ -12,7 +12,8 @@ import sys
 
 import numpy as np
 
-TOK = re.compile(r'"[^"]*"|[\[\]{}]|[^\s\[\]{},"]+')
+# имя может содержать кавычки внутри (DEF Napravlyayushchie_-_"GRAVIKA"_-_…), строка — начинается с кавычки
+TOK = re.compile(r'"[^"]*"|[\[\]{}]|[^\s\[\]{},"][^\s\[\]{},]*')
 
 
 def _tokens(path):

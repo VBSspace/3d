@@ -78,11 +78,40 @@ def color_options(spec, out_dir, cat):
     return opts
 
 
+# популярные декоры EGGER для автоподбора вариантов цвета
+WOODS = ['H1145', 'H3309', 'H3131', 'H1176', 'H1180', 'H1344']
+PLAINS = ['W1100', 'U702', 'U727', 'U999', 'U113']
+
+
+def auto_colors(data):
+    """Подбирает 3 варианта к декору фасадов: к дереву — другое дерево, белый и серый; к однотону — белый, дерево, тёмный."""
+    key = data['facade'].get('material')
+    if not key:
+        # фасадов нет — берём самый частый декор деталей
+        by_name = {v['name']: k for k, v in data['materials'].items() if k.startswith('tex:')}
+        cnt = {}
+        for p in data['parts']:
+            for m in (p.get('material') or '').split(', '):
+                if m in by_name:
+                    cnt[by_name[m]] = cnt.get(by_name[m], 0) + 1
+        key = max(cnt, key=cnt.get) if cnt else None
+    if not key:
+        return None, ''
+    cur = key[4:].upper()
+    if cur[:1] in ('H', 'K', 'F'):
+        picks = [next(w for w in WOODS if w != cur), 'W1100', 'U702']
+    else:
+        picks = ['W1100' if cur != 'W1100' else 'U113', 'H1145', 'U999' if cur not in ('U999', 'U968') else 'U702']
+    return key, ','.join(x for x in picks if x != cur)
+
+
 def write_index(out_dir, title, folder):
     with open(os.path.join(HERE, 'template.html'), encoding='utf-8') as f:
         html = f.read()
     url = SITE + folder + '/'
-    og = ''
+    # без снимка проекта — фирменная карточка BVSspace
+    og = ('<meta property="og:image" content="%sviewer/og.jpg">\n'
+          '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">') % SITE
     if os.path.exists(os.path.join(out_dir, 'preview.jpg')):
         og = ('<meta property="og:image" content="%spreview.jpg">\n'
               '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n'
@@ -100,7 +129,7 @@ def main():
     ap.add_argument('--title', required=True, help='название изделия: «Кухня», «Шкаф в прихожую»')
     ap.add_argument('--walls', help='.wrl стен по замеру (по умолчанию ищется рядом)')
     ap.add_argument('--slug', help='латиница для ссылки (по умолчанию из названия)')
-    ap.add_argument('--colors', help='варианты цвета фасадов: коды декоров через запятую (H1145,U702) или Имя=#цвет')
+    ap.add_argument('--colors', default='auto', help='варианты цвета фасадов: auto (по умолчанию), none, или коды декоров через запятую (H1145,U702) / Имя=#цвет')
     ap.add_argument('--door-angle', type=float, default=wrl2glb.DOOR_ANGLE)
     ap.add_argument('--eye', help='точка «как в жизни» вручную: x,z в мм (координаты Базиса)')
     ap.add_argument('--push', action='store_true', help='сразу закоммитить и отправить на GitHub')
@@ -118,7 +147,15 @@ def main():
     data, _ = wrl2glb.build(a.model, walls, out, a.title, code, door_angle=a.door_angle)
 
     cat = wrl2glb.load_catalog()
-    data['facade']['options'] = color_options(a.colors, out, cat)
+    colors = (a.colors or 'auto').strip()
+    if colors.lower() == 'none':
+        colors = ''
+    elif colors.lower() == 'auto':
+        key, colors = auto_colors(data)
+        if key:
+            data['facade']['material'] = key
+            print('Цвета фасадов (автоматически):', colors)
+    data['facade']['options'] = color_options(colors, out, cat)
     if a.eye:
         x, z = [float(v) for v in a.eye.split(',')]
         data['eye']['pos'] = [x, 1600, z]
@@ -129,9 +166,12 @@ def main():
     print('Проверить у себя:  python tools/serve.py  ->  http://localhost:8000/%s/' % folder)
     if a.push:
         subprocess.check_call(['git', 'add', folder], cwd=REPO)
-        subprocess.check_call(['git', 'commit', '-m', '3D: %s (%s)' % (a.title, code)], cwd=REPO)
-        subprocess.check_call(['git', 'push'], cwd=REPO)
-        print('Опубликовано. GitHub Pages обновится через 1–2 минуты.')
+        if subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=REPO).returncode:
+            subprocess.check_call(['git', 'commit', '-q', '-m', '3D: %s (%s)' % (a.title, code)], cwd=REPO)
+            subprocess.check_call(['git', 'push', '-q'], cwd=REPO)
+            print('Опубликовано. GitHub Pages обновится через 1–2 минуты.')
+        else:
+            print('Модель не изменилась — публиковать нечего.')
 
 
 if __name__ == '__main__':

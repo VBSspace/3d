@@ -11,8 +11,8 @@ import re
 KEEP = {
     'steel', 'seal', 'clip', 'top', 'blumotion', 'asko', 'blum', 'hettich', 'boyard',
     'tandembox', 'legrabox', 'movento', 'aventos', 'servo', 'drive', 'tip', 'on', 'push',
-    'egger', 'kronospan', 'lamarty', 'gtv', 'hafele', 'bosch', 'gorenje', 'beko', 'maunfeld',
-    'pe', 'st', 'led',
+    'egger', 'kronospan', 'open', 'gravika', 'minifix', 'lamarty', 'gtv', 'hafele', 'bosch', 'gorenje', 'beko', 'maunfeld',
+    'pe', 'led',
 }
 # слова, после которых «_» = мягкий знак (+ пробел)
 SOFT = {'dver', 'mebel', 'stal', 'panel', 'shchel', 'antresol', 'tsokol', 'profil',
@@ -82,7 +82,8 @@ TOKEN = re.compile(r'[A-Za-z]+|_+|[^A-Za-z_]+')
 def rus(name):
     if not name:
         return ''
-    name = name.split('+')[0]                    # «Петля…+Отверстие…» -> только петля
+    if name.lower().startswith('petlya'):
+        name = name.split('+')[0]                # «Петля…+Отверстие…» -> только петля
     toks = TOKEN.findall(name)
     # скобки: «Полка__просвет_340_» -> «Полка (просвет 340)»
     paren_open = None

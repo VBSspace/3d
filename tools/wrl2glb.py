@@ -34,6 +34,9 @@ HARDWARE = re.compile(r'^(Petlya|Podpyatnik|Opora|Ruchka|Napravlyayushch|Zashch|
 DOOR = re.compile(r'^Dver', re.I)
 SLIDE = re.compile(r'(Yashchik|Yashik|Vydvizhn|otkatn|Vykatn)', re.I)
 PLATE = re.compile(r'^(Krestoobr|.*otvetnaya_planka)', re.I)
+PANELISH = re.compile(r'^(Bok|Dno|Fasad|Frontal|Polk|Stoyk|Krysh|Stenk|St\._|Zadn|Peregorod|Tsokol|'
+                      r'Kryshk|Gorizontal|Vertikal|Planka_fasad|Lits)', re.I)
+ROOM_NODE = re.compile(r'^Pomeshchenie', re.I)
 APPLIANCES = re.compile(r'^(Tekhnika|Bytovaya_tekhnika)$', re.I)
 
 DOOR_ANGLE = 75          # градусов
@@ -336,10 +339,17 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
 
     # ---- 1. какие фигуры к какой детали
     parts = {}          # key -> dict(name, node_uid, shapes, kind, block_uid)
+    inline_room = []    # помещение внутри модели (если нет отдельного файла стен)
     order = []
     for shp in sc.shapes:
         path = shp['path']
         if any(SKIP_NODE.match(n) for n, _ in path):
+            continue
+        # помещение, импортированное прямо в модель мебели: берём стены из отдельного файла
+        if any(ROOM_NODE.match(n) for n, _ in path):
+            if room_wrl and os.path.isfile(room_wrl):
+                continue
+            inline_room.append(shp)
             continue
         if not path:
             continue
@@ -355,7 +365,9 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
             kind = 'appliance'
         else:
             for i, (n, u) in enumerate(p):
-                if HARDWARE.match(n):
+                # группа фурнитуры, внутри которой есть ящик/фасад/панели корпуса, — не деталь, идём глубже
+                if HARDWARE.match(n) and not any(PANELISH.match(nn) or SLIDE.search(nn) or DOOR.match(nn)
+                                                 for nn, _ in p[i + 1:]):
                     cut = i + 1
                     kind = 'hardware'
                     if any(PLATE.match(nn) for nn, _ in p[i + 1:]):
@@ -528,7 +540,7 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
         size = sorted([int(round(v)) for v in lsize], reverse=True)
         kind = pp['kind']
         if kind == 'panel' and (raw.lower().startswith('fasad') or
-                                any(DOOR.match(n) for n, _ in pp['path'][:-1])):
+                                any(DOOR.match(n) or n.lower().startswith('fasad') for n, _ in pp['path'][:-1])):
             kind = 'facade'
         out_parts.append({'id': pid, 'name': name, 'size': size, 'kind': kind,
                           'material': ', '.join(dict.fromkeys(labels)) or None,
@@ -568,6 +580,11 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
             depth = float((mx - mn) @ np.abs(front_default))
             mid = 'm%d' % (len(movers) + 1)
             mover_of_uid[u] = mid
+            # лицо ящика — передняя тонкая панель
+            front = [p for p in plist if p['kind'] == 'panel'
+                     and (part_bbox[p['id']][1] - part_bbox[p['id']][0]) @ np.abs(front_default) < 30]
+            if front:
+                max(front, key=lambda p: part_bbox[p['id']][1] @ front_default)['kind'] = 'facade'
             movers.append({'id': mid, 'type': 'slide', 'name': rus(n['name']), 'uid': u,
                            'dir': front_default.tolist(), 'dist': round(depth * SLIDE_PART),
                            'parts': [p['id'] for p in plist]})
@@ -674,15 +691,22 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
 
     # ---- 6. помещение
     room_parts = []
+    room_shapes, names = [], []
     if room_wrl and os.path.isfile(room_wrl):
         log('Читаю помещение', os.path.basename(room_wrl))
-        rs = wrl_reader.read(room_wrl)
+        room_shapes = wrl_reader.read(room_wrl).shapes
         names = room_names(room_wrl)
-        for j, shp in enumerate(rs.shapes):
+    elif inline_room:
+        log('Помещение взято из модели')
+        room_shapes = inline_room
+    if room_shapes:
+        for j, shp in enumerate(room_shapes):
             T = shape_tris(shp)
             if not len(T):
                 continue
-            is_wall = shp['transp'] > 0.3
+            ext = T.reshape(-1, 3).max(0) - T.reshape(-1, 3).min(0)
+            big = sorted(ext)
+            is_wall = shp['transp'] > 0.3 or (big[0] < 30 and big[1] > 900 and big[2] > 900)
             mk = 'room_wall' if is_wall else 'room:' + hexcolor(shp['color'])
             spec = {'color': shp['color'], 'rough': 0.9, 'label': ''}
             if is_wall:
@@ -697,6 +721,8 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
             bmin, bmax = P.min(0), P.max(0)
             c = (bmin + bmax) / 2
             nm = 'Стена' if is_wall else 'Элемент помещения'
+            if shp.get('path'):
+                nm = short_room_name(rus(shp['path'][-1][0])) or nm
             if names:
                 best = min(names, key=lambda q: float(np.sum((np.array(q[1]) - c) ** 2)))
                 nm = short_room_name(best[0]) or nm
@@ -803,6 +829,8 @@ def eye_point(room_parts, fmin, fmax):
             segs[s].append((mn[0], mx[0]))
     best = None
     for s, lst in segs.items():
+        if s == ('z', 0):
+            continue                      # за спиной мебели (у задней стены) не встаём
         along = 2 if s[0] == 'x' else 0
         lo, hi = rmin[along], rmax[along]
         if not lst:
@@ -821,10 +849,15 @@ def eye_point(room_parts, fmin, fmax):
                 continue
             g = max(gaps)
             gap = (g[0], g[1], True)
+        # боковой проём годится, только если он перед мебелью
+        if s[0] == 'x' and gap[1] < fmax[2]:
+            continue
         # приоритет: настоящий проём в стене шириной от 600 мм
         score = (gap[2] and gap[0] >= 600, gap[0])
         if best is None or score > best[0]:
             best = (score, s, gap)
+    if best is None:
+        best = (None, ('z', 1), (rmax[0] - rmin[0], fc[0], False))
     _, s, gap = best
     ax = 0 if s[0] == 'x' else 2
     along = 2 if ax == 0 else 0
@@ -833,6 +866,9 @@ def eye_point(room_parts, fmin, fmax):
     pos[along] = gap[1]
     edge = rmax[ax] if s[1] == 1 else rmin[ax]
     pos[ax] = edge + (550 if s[1] == 1 else -550)      # стоим на пороге, чуть снаружи
+    if s == ('z', 1):
+        pos[2] = max(pos[2], fmax[2] + 2000)          # не ближе 2 м к фасадам
+        pos[0] = fc[0]
     return {'pos': [round(float(v)) for v in pos], 'target': [round(float(v)) for v in target]}
 
 
