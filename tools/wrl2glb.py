@@ -469,7 +469,17 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
         bmin, bmax = P.min(0), P.max(0)
         L = (np.c_[P, np.ones(len(P))] @ Minv.T)[:, :3]
         lsize = L.max(0) - L.min(0)
+        # направление волокна (в .wrl его нет): корпус — вдоль длинной стороны,
+        # фасады — вертикально, как принято в мебели
         grain = int(np.argmax(lsize))
+        is_facade = pp['kind'] == 'panel' and (pp['raw'].lower().startswith('fasad') or
+                                               any(DOOR.match(n) for n, _ in pp['path'][:-1]))
+        if is_facade:
+            up_local = np.abs(Minv[:3, :3] @ np.array([0.0, 1.0, 0.0]))   # мировая вертикаль в осях детали
+            thin = int(np.argmin(lsize))
+            cand = int(np.argmax(up_local))
+            if cand != thin and up_local[cand] > 0.7:
+                grain = cand
         diag = float(np.linalg.norm(bmax - bmin))
         ntri = len(allT)
         cell = 0.0
