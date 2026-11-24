@@ -7,7 +7,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import CONFIG from './config.js';
-import { createPost, enhanceMaterials, buildRoom } from './realism.js';
+import { createPost, enhanceMaterials, buildRoom, buildLeds } from './realism.js';
 
 const DRACO_PATH = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/';
 const MM = 0.001;
@@ -47,6 +47,7 @@ const ICON = {
   front: I('<rect x="5" y="4" width="14" height="16" rx="1"/><path d="M12 4v16"/>'),
   side: I('<path d="M6 4h12v16H6z"/><path d="M9 4v16"/>'),
   top: I('<rect x="4" y="7" width="16" height="10" rx="1"/><path d="M4 11h16"/>'),
+  bulb: I('<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z"/>'),
   swipe: '<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 26V11a3 3 0 0 1 6 0v11l7.5 1.6a4 4 0 0 1 3.1 4.6L35 38H21l-7-8.5a2.6 2.6 0 0 1 3.7-3.6z"/><path d="M8 8h-5m0 0 3-3M3 8l3 3M40 8h5m0 0-3-3m3 3-3 3"/></svg>',
   pinch: '<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><circle cx="15" cy="15" r="4"/><circle cx="33" cy="33" r="4"/><path d="m5 5 6 6M43 43l-6-6M22 22l4 4"/></svg>',
   tap: '<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 28V13a3 3 0 0 1 6 0v11l7.5 1.6a4 4 0 0 1 3.1 4.6L35 40H21l-7-8.5a2.6 2.6 0 0 1 3.7-3.6z"/><path d="M14 9a8 8 0 0 1 18 0"/></svg>',
@@ -143,6 +144,7 @@ function buildUI() {
   tools.push(tool('life', 'person', 'Как в жизни', toggleLife));
   if (d.facade?.material && d.facade.options?.length) tools.push(tool('colors', 'palette', 'Цвет фасадов', () => togglePop('colors')));
   tools.push(tool('xray', 'xray', 'Заглянуть внутрь', () => setMode(S.mode === 'xray' ? 'tex' : 'xray')));
+  if (S.leds) tools.push(tool('leds', 'bulb', 'Подсветка', toggleEvening));
   if (CONFIG.api) tools.push(tool('notes', 'note', 'Замечание', toggleNotesMode));
   tools.push(el('span', 'sep'));
   tools.push(tool('views', 'view', 'Вид', () => togglePop('views')));
@@ -252,6 +254,7 @@ function syncOpts() {
   $('#opt-appl')?.classList.toggle('on', S.applMeshes[0]?.visible);
   $('#t-life')?.classList.toggle('on', S.life);
   $('#t-notes')?.classList.toggle('on', S.notesMode);
+  $('#t-leds')?.classList.toggle('on', !!S.evening);
   const anyOpen = S.movers.some((m) => m.target > 0.5);
   const oa = $('#t-openall');
   if (oa) oa.innerHTML = (anyOpen ? ICON.close : ICON.open) + `<span>${anyOpen ? 'Закрыть всё' : 'Открыть всё'}</span>`;
@@ -352,6 +355,8 @@ function setup(root) {
   if (S.room) floor.position.y -= 0.002;
   buildMovers();
   renderer.shadowMap.needsUpdate = true;
+  S.leds = buildLeds({ parts: S.parts, meshOf: partObject, MM, mobile: isTouch });
+  if (S.leds && post) post.bloom.enabled = true;
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
   if (fm?.map?.image) {
@@ -630,6 +635,25 @@ function toggleDark() {
   floorMat.color.set(S.dark ? 0x2b2622 : 0xebe3d8);
   EDGE_MAT.color.set(S.dark ? 0x1a1613 : 0x3a332d);
   hemi.intensity = S.dark ? 0.4 : 0.55;
+  syncOpts();
+}
+// «Подсветка»: приглушаем свет комнаты, как вечером, — светодиоды становятся заметны
+function toggleEvening() {
+  S.evening = !S.evening;
+  const k = S.evening ? 0.18 : 1;
+  hemi.intensity = 0.4 * k;
+  sun.intensity = 2.2 * k;
+  fill.intensity = 0.6 * k;
+  scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!m || m.envMapIntensity === undefined) continue;
+      if (m.userData.envBase === undefined) m.userData.envBase = m.envMapIntensity;
+      m.envMapIntensity = m.userData.envBase * (S.evening ? 0.15 : 1);
+    }
+  });
+  if (post) post.bloom.strength = S.evening ? 0.9 : 0.55;
+  toast(S.evening ? 'Вечерний свет — видно подсветку' : 'Дневной свет');
   syncOpts();
 }
 function toggleWalls() { S.roomGroup.visible = !S.roomGroup.visible; syncOpts(); }
@@ -1184,7 +1208,7 @@ function watchFps(dt) {
   if (fpsN === 90) {
     if (fpsAcc / fpsN > 1 / 26) {
       S.lowPower = true;
-      if (post) post.ao.enabled = false;
+      if (post) { post.ao.enabled = false; post.bloom.enabled = false; }
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
       renderer.setSize(innerWidth, innerHeight);
       post?.setSize(innerWidth, innerHeight);

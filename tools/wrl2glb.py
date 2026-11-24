@@ -36,6 +36,7 @@ SLIDE = re.compile(r'(Yashchik|Yashik|Vydvizhn|otkatn|Vykatn)', re.I)
 PLATE = re.compile(r'^(Krestoobr|.*otvetnaya_planka)', re.I)
 PANELISH = re.compile(r'^(Bok|Dno|Fasad|Frontal|Polk|Stoyk|Krysh|Stenk|St\._|Zadn|Peregorod|Tsokol|'
                       r'Kryshk|Gorizontal|Vertikal|Planka_fasad|Lits)', re.I)
+LIGHT = re.compile(r'(FM1|svetodiod|podsvet|s_podsvetk|_LED|LED_|GOLIGHT|svetil.nik|svet_lent)', re.I)
 ROOM_NODE = re.compile(r'^Pomeshchenie', re.I)
 APPLIANCES = re.compile(r'^(Tekhnika|Bytovaya_tekhnika)$', re.I)
 
@@ -547,6 +548,39 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
                           'block': block_of(pp), '_key': key, '_path': pp['path']})
         if (i + 1) % 20 == 0:
             log('  деталей: %d' % (i + 1))
+
+    # ---- 4б. подсветка: профили FM1, светодиодные ленты, штанги с подсветкой
+    for p in out_parts:
+        raw = parts[p['_key']]['raw']
+        if not (LIGHT.search(raw) or LIGHT.search(p['name'])):
+            continue
+        bmin, bmax = part_bbox[p['id']]
+        ext = bmax - bmin
+        if ext.max() < 100:
+            continue                      # не протяжённый — не лента
+        ax_long, ax_thin = int(np.argmax(ext)), int(np.argmin(ext))
+        ax_w = 3 - ax_long - ax_thin
+        pc = (bmin + bmax) / 2
+        # деталь, в паз или на которую поставлен профиль, — свет идёт от неё наружу
+        host, best = None, 0.0
+        for q in out_parts:
+            if q is p or q['kind'] not in ('panel', 'facade'):
+                continue
+            qmin, qmax = part_bbox[q['id']]
+            ov = np.minimum(bmax, qmax + 2) - np.maximum(bmin, qmin - 2)
+            if (ov > 0).all() and np.prod(ov) > best:
+                host, best = q, float(np.prod(ov))
+        d = np.zeros(3)
+        if host is not None:
+            hc = (part_bbox[host['id']][0] + part_bbox[host['id']][1]) / 2
+            d[ax_thin] = 1.0 if pc[ax_thin] >= hc[ax_thin] else -1.0
+        else:
+            d[1] = -1.0
+        m = re.search(r'(\d{4})\s*[KК]', raw + ' ' + p['name'])
+        p['kind'] = 'light'
+        p['light'] = {'center': [round(float(v), 1) for v in pc], 'dir': d.tolist(), 'long': ax_long,
+                      'len': round(float(ext[ax_long]), 1), 'width': round(float(ext[ax_w]), 1),
+                      'depth': round(float(ext[ax_thin]), 1), 'temp': int(m.group(1)) if m else 4000}
 
     # ---- 5. двери и выдвижные
     front_default = np.array([0.0, 0.0, 1.0])

@@ -4,6 +4,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
 // ------------------------------------------------------------------ постобработка
 export function createPost(renderer, scene, camera, { mobile }) {
@@ -20,9 +22,13 @@ export function createPost(renderer, scene, camera, { mobile }) {
     samples: mobile ? 8 : 16, distanceFallOff: 1.0, screenSpaceRadius: false });
   ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: mobile ? 6 : 8, rings: 2, samples: mobile ? 8 : 16 });
   composer.addPass(ao);
+  // ореол только у очень ярких точек — светодиодных лент (обычные поверхности не светятся)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.35, 1.0);
+  bloom.enabled = false;
+  composer.addPass(bloom);
   composer.addPass(new OutputPass());
   return {
-    composer, ao,
+    composer, ao, bloom,
     render() { composer.render(); },
     setSize(w, h) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); },
   };
@@ -147,5 +153,55 @@ export function buildRoom({ scene, renderer, roomMeshes, parts, MM }) {
       }
       floor.visible = enabled;
     },
+  };
+}
+
+// ------------------------------------------------------------------ подсветка
+const KELVIN = [[2700, 0xffa757], [3000, 0xffb46b], [3500, 0xffc489], [4000, 0xffd1a3], [4500, 0xffdbba],
+  [5000, 0xffe4ce], [6000, 0xfff3ef], [6500, 0xfff9fd]];
+function kelvin(t) {
+  let best = KELVIN[0];
+  for (const k of KELVIN) if (Math.abs(k[0] - t) < Math.abs(best[0] - t)) best = k;
+  return new THREE.Color(best[1]);
+}
+
+/**
+ * Светодиодные профили/ленты: светящийся рассеиватель + прямоугольный источник света вдоль профиля.
+ * Всё крепится к самой детали — если она в ящике или на двери, свет едет вместе с ней.
+ */
+export function buildLeds({ parts, meshOf, MM, mobile }) {
+  const leds = [];
+  const list = [...parts.values()].filter((p) => p.kind === 'light' && p.light);
+  if (!list.length) return null;
+  RectAreaLightUniformsLib.init();
+  for (const p of list) {
+    const L = p.light;
+    const mesh = meshOf(p.id);
+    if (!mesh) continue;
+    const c = kelvin(L.temp);
+    const dir = new THREE.Vector3(...L.dir);
+    const len = L.len * MM, w = Math.max(L.width - 4, 4) * MM;
+    const pos = new THREE.Vector3(...L.center).multiplyScalar(MM).addScaledVector(dir, (L.depth / 2 + 0.4) * MM);
+    // ось ленты и ориентация: X прямоугольника — вдоль профиля, нормаль — направление света
+    const along = new THREE.Vector3(); along.setComponent(L.long, 1);
+    const up = new THREE.Vector3().crossVectors(along, dir).normalize();   // правая тройка: x=вдоль, z=−свет
+    const basis = new THREE.Matrix4().makeBasis(along, up, dir.clone().negate());
+    // рассеиватель (не участвует в тон-маппинге — ярче белого, даёт ореол)
+    const stripMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(4), toneMapped: false, side: THREE.DoubleSide });
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(len, w), stripMat);
+    strip.quaternion.setFromRotationMatrix(basis);
+    strip.position.copy(pos);
+    strip.raycast = () => {};
+    mesh.add(strip);
+    // источник света: прямоугольник длиной с профиль, светит наружу
+    const light = new THREE.RectAreaLight(c, mobile ? 18 : 24, len, Math.max(w, 0.02));
+    light.position.copy(pos);
+    light.quaternion.setFromRotationMatrix(basis);
+    mesh.add(light);
+    leds.push({ strip, light, stripMat, base: c });
+  }
+  return {
+    leds,
+    set(on) { for (const l of leds) { l.strip.visible = on; l.light.visible = on; } },
   };
 }
