@@ -61,8 +61,8 @@ def clear_clipboard():
 
 
 def ask_secrets(env):
-    print('\n1) В Telegram, в чате с @BotFather, отправьте /revoke и выберите @bvsspace_notes_bot.')
-    print('2) В ответе выделите новый токен мышкой и нажмите Ctrl+C (скопировать).')
+    print('\n1) В Telegram, в чате с @BotFather, найдите последний токен (новый можно получить: /revoke → @bvsspace_notes_bot).')
+    print('2) Выделите токен мышкой и нажмите Ctrl+C (скопировать).')
     print('3) Вернитесь сюда и нажмите Enter. Вставлять ничего не нужно — токен возьмётся из буфера обмена.')
     token = None
     for _ in range(5):
