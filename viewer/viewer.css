@@ -156,6 +156,9 @@ button{font-family:inherit;color:inherit}
 #loader p{font-size:12px;color:var(--mut)}
 
 @media (max-width:640px){
+  .tag{max-width:190px;padding:8px 10px;font-size:11px}
+  .tag b{font-size:12px}
+  .tag .acts button{padding:5px 8px;font-size:10.5px}
   .mark b{font-size:13px;padding:5px 8px}
   .mark small{font-size:7.5px;letter-spacing:2px}
   .title{top:52px;font-size:12px}

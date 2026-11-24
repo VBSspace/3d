@@ -659,12 +659,11 @@ function select(hit) {
   const p = S.parts.get(pid);
   S.selected = p.room ? null : pid;
   applyMaterials();
-  const blk = (S.data.blocks || []).find((b) => b.id === p.block);
+  // компактная подпись: название, размер, материал; закрывается сама
   const div = el('div', 'tag');
   div.innerHTML = `<b>${esc(p.name)}</b>` +
     (p.size ? `<span class="sz">${p.size.join(' × ')} мм</span>` : '') +
-    (p.material ? `<div class="mt">${esc(p.material)}</div>` : '') +
-    (blk && !p.room ? `<div class="mt">${esc(blk.name)}</div>` : '');
+    (p.material ? `<div class="mt">${esc(p.material)}</div>` : '');
   const acts = el('div', 'acts');
   const mv = S.moverOfPart.get(pid);
   if (mv) {
@@ -684,8 +683,17 @@ function select(hit) {
   hit.object.add(obj);
   obj.position.copy(hit.object.worldToLocal(hit.point.clone()));
   S.tag = obj;
+  // закрыть через 5 с, если на подпись не навели мышь / не нажали кнопку
+  let hold = false;
+  div.addEventListener('pointerenter', () => { hold = true; });
+  div.addEventListener('pointerleave', () => { hold = false; });
+  const close = () => { if (S.tag !== obj) return; if (hold) { tagTimer = setTimeout(close, 2000); return; } select(null); };
+  clearTimeout(tagTimer);
+  tagTimer = setTimeout(close, 5000);
 }
+let tagTimer;
 function clearTag() {
+  clearTimeout(tagTimer);
   if (S.tag) { S.tag.element.remove(); S.tag.parent?.remove(S.tag); S.tag = null; }
 }
 
@@ -1063,7 +1071,15 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   // дверь открывается от нажатия на неё; ящик — от нажатия на его лицо (фасад)
   const pid = hit.object.userData.pid;
   const mv = S.moverOfPart.get(pid);
-  if (mv && (mv.type === 'door' || S.parts.get(pid)?.kind === 'facade')) { setMover(mv, mv.target < 0.5); syncOpts(); }
+  if (mv && (mv.type === 'door' || S.parts.get(pid)?.kind === 'facade')) {
+    // дверь просто открывается; карточка не нужна — она закрывала бы вид
+    setMover(mv, mv.target < 0.5);
+    syncOpts();
+    select(null);
+    const p = S.parts.get(pid);
+    toast(`${p.name}${p.size ? ' · ' + p.size.join(' × ') + ' мм' : ''}`, 1800);
+    return;
+  }
   select(hit);
 });
 $('#notes .x').onclick = closeSheet;
