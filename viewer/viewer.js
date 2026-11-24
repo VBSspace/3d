@@ -144,7 +144,7 @@ function buildUI() {
   tools.push(tool('life', 'person', 'Как в жизни', toggleLife));
   if (d.facade?.material && d.facade.options?.length) tools.push(tool('colors', 'palette', 'Цвет фасадов', () => togglePop('colors')));
   tools.push(tool('xray', 'xray', 'Заглянуть внутрь', () => setMode(S.mode === 'xray' ? 'tex' : 'xray')));
-  if (S.leds) tools.push(tool('leds', 'bulb', 'Подсветка', toggleEvening));
+  if (S.leds) tools.push(tool('leds', 'bulb', 'Подсветка', toggleLeds));
   if (CONFIG.api) tools.push(tool('notes', 'note', 'Замечание', toggleNotesMode));
   tools.push(el('span', 'sep'));
   tools.push(tool('views', 'view', 'Вид', () => togglePop('views')));
@@ -170,6 +170,7 @@ function buildUI() {
     opt('xray', 'Заглянуть внутрь', () => setMode('xray'), 'mode-xray'),
     opt('moon', 'Тёмный фон', toggleDark, 'opt-dark'),
   );
+  if (S.leds) g1.append(opt('bulb', 'Вечерний свет', toggleEvening, 'opt-evening'));
   pm.append(g1);
   pm.append(el('h4', null, 'Инструменты'));
   const g2 = el('div', 'grid');
@@ -254,7 +255,8 @@ function syncOpts() {
   $('#opt-appl')?.classList.toggle('on', S.applMeshes[0]?.visible);
   $('#t-life')?.classList.toggle('on', S.life);
   $('#t-notes')?.classList.toggle('on', S.notesMode);
-  $('#t-leds')?.classList.toggle('on', !!S.evening);
+  $('#t-leds')?.classList.toggle('on', !!S.ledsOn);
+  $('#opt-evening')?.classList.toggle('on', !!S.evening);
   const anyOpen = S.movers.some((m) => m.target > 0.5);
   const oa = $('#t-openall');
   if (oa) oa.innerHTML = (anyOpen ? ICON.close : ICON.open) + `<span>${anyOpen ? 'Закрыть всё' : 'Открыть всё'}</span>`;
@@ -358,6 +360,7 @@ function setup(root) {
   scene.updateMatrixWorld(true);
   S.leds = buildLeds({ parts: S.parts, meshOf: partObject, MM, mobile: isTouch,
     solids: [...S.partMeshes, ...S.roomMeshes].filter((m) => S.parts.get(m.userData.pid)?.kind !== 'light') });
+  S.ledsOn = !!S.leds;
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
   if (fm?.map?.image) {
@@ -638,7 +641,15 @@ function toggleDark() {
   hemi.intensity = S.dark ? 0.4 : 0.55;
   syncOpts();
 }
-// «Подсветка»: приглушаем свет комнаты, как вечером, — светодиоды становятся заметны
+// «Подсветка»: включить / выключить светодиоды
+function toggleLeds() {
+  S.ledsOn = !S.ledsOn;
+  S.leds.set(S.ledsOn);
+  renderer.shadowMap.needsUpdate = true;
+  toast(S.ledsOn ? 'Подсветка включена' : 'Подсветка выключена', 1500);
+  syncOpts();
+}
+// «Вечерний свет»: приглушаем свет комнаты — светодиоды становятся заметны
 function toggleEvening() {
   S.evening = !S.evening;
   const k = S.evening ? 0.18 : 1;
@@ -654,6 +665,8 @@ function toggleEvening() {
     }
   });
   S.leds?.evening(S.evening);
+  if (S.evening && S.leds && !S.ledsOn) toggleLeds();
+  closePops();
   toast(S.evening ? 'Вечерний свет — видно подсветку' : 'Дневной свет');
   syncOpts();
 }
