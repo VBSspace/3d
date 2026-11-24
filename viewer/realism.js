@@ -14,10 +14,11 @@ export function createPost(renderer, scene, camera, { mobile }) {
   composer.setSize(size.x, size.y);
   composer.addPass(new RenderPass(scene, camera));
   const ao = new GTAOPass(scene, camera, size.x, size.y);
-  ao.blendIntensity = 1.0;
-  ao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.2, thickness: 1.5, scale: 1.6,
+  // короткий радиус: затемняются стыки и углы, без грязных пятен по всей ячейке
+  ao.blendIntensity = 0.85;
+  ao.updateGtaoMaterial({ radius: 0.22, distanceExponent: 2.0, thickness: 1.0, scale: 1.0,
     samples: mobile ? 8 : 16, distanceFallOff: 1.0, screenSpaceRadius: false });
-  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: mobile ? 4 : 6, rings: 2, samples: mobile ? 8 : 16 });
+  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: mobile ? 6 : 8, rings: 2, samples: mobile ? 8 : 16 });
   composer.addPass(ao);
   composer.addPass(new OutputPass());
   return {
@@ -50,7 +51,7 @@ export function enhanceMaterials(meshes, renderer) {
         mat.color.setRGB(0.86, 0.87, 0.89);
       } else {
         // ЛДСП: полуматовая поверхность, у древесных декоров — лёгкий рельеф пор
-        Object.assign(mat, { metalness: 0, roughness: isWood(code) ? 0.58 : 0.66, envMapIntensity: 0.6 });
+        Object.assign(mat, { metalness: 0, roughness: isWood(code) ? 0.58 : 0.66, envMapIntensity: 0.4 });
         if (isWood(code) && mat.map) { mat.bumpMap = mat.map; mat.bumpScale = 0.6; }
       }
     } else if (name === 'steel') {
@@ -136,12 +137,8 @@ export function buildRoom({ scene, renderer, roomMeshes, parts, MM }) {
   floor.receiveShadow = true;
   floor.userData.pid = null;
   scene.add(floor);
-  // потолочный светильник
-  const lamp = new THREE.PointLight(0xfff0dc, 3.5, 0, 2);
-  lamp.position.set(center.x, Math.max(2.3, rmax.y - 0.1), center.z + sz * 0.25);
-  scene.add(lamp);
   return {
-    walls, floor, lamp, center, min: rmin, max: rmax,
+    walls, floor, center, min: rmin, max: rmax,
     update(camera, enabled, inside) {
       for (const w of walls) {
         // «как в жизни» стоим в проёме — видим все стены; иначе прячем ту, что загораживает мебель

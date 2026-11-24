@@ -72,7 +72,8 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.VSMShadowMap;     // мягкие размытые тени, как от комнатного света
+renderer.shadowMap.autoUpdate = false;           // пересчёт только когда что-то движется
 stage.appendChild(renderer.domElement);
 
 const labels = new CSS2DRenderer({ element: $('#labels') });
@@ -98,14 +99,20 @@ let post = null;
 try { post = createPost(renderer, scene, camera, { mobile: isTouch }); } catch (e) { console.warn('без постобработки', e); }
 function draw() { if (post) post.render(); else renderer.render(scene, camera); }
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0xd8cfc4, 0.55);
+// свет: основной — сверху-спереди со стороны камеры (тени от полок ложатся внутрь ячеек),
+// слабая заливка слева, мягкий рассеянный свет от неба/пола
+const hemi = new THREE.HemisphereLight(0xffffff, 0xd8cfc4, 0.4);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff6ec, 1.6);
+const sun = new THREE.DirectionalLight(0xfff6ec, 2.2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.bias = -0.0004;
+sun.shadow.bias = -0.0006;
 sun.shadow.normalBias = 0.02;
-scene.add(sun, sun.target);
+sun.shadow.radius = isTouch ? 9 : 14;
+sun.shadow.blurSamples = isTouch ? 10 : 20;
+const fill = new THREE.DirectionalLight(0xf3f0ff, 0.6);
+fill.target = sun.target;
+scene.add(sun, sun.target, fill);
 const floorMat = new THREE.MeshStandardMaterial({ color: 0xebe3d8, roughness: 0.95 });
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), floorMat);
 floor.rotation.x = -Math.PI / 2;
@@ -329,7 +336,8 @@ function setup(root) {
   floor.position.set((smin.x + smax.x) / 2, Math.min(0, smin.y) - 0.0005, (smin.z + smax.z) / 2);
   // свет и тени
   const r = Math.max(ssize.length() / 2, 1);
-  sun.position.copy(S.center).add(new THREE.Vector3(-0.6, 1.4, 1.1).multiplyScalar(r * 1.6));
+  sun.position.copy(S.center).add(new THREE.Vector3(0.55, 2.2, 1.3).multiplyScalar(r * 1.6));
+  fill.position.copy(S.center).add(new THREE.Vector3(-1.2, 0.6, 0.8).multiplyScalar(r * 1.6));
   sun.target.position.copy(S.center);
   const sc = sun.shadow.camera;
   sc.left = sc.bottom = -r * 1.3; sc.right = sc.top = r * 1.3; sc.near = 0.1; sc.far = r * 6;
@@ -343,6 +351,7 @@ function setup(root) {
   S.room = buildRoom({ scene, renderer, roomMeshes: S.roomMeshes, parts: S.parts, MM });
   if (S.room) floor.position.y -= 0.002;
   buildMovers();
+  renderer.shadowMap.needsUpdate = true;
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
   if (fm?.map?.image) {
@@ -409,6 +418,7 @@ function toggleAll() {
 function stepMovers(dt) {
   for (const m of S.movers) {
     if (m.t === m.target) continue;
+    renderer.shadowMap.needsUpdate = true;
     const speed = m.type === 'door' ? 1.6 : 1.3;
     m.t = m.target > m.t ? Math.min(m.target, m.t + dt * speed) : Math.max(m.target, m.t - dt * speed);
     const e = m.t < 0.5 ? 2 * m.t * m.t : 1 - Math.pow(-2 * m.t + 2, 2) / 2;
@@ -576,6 +586,7 @@ function setMode(m) {
     if (mesh.userData.edges) mesh.userData.edges.visible = m !== 'tex';
   }
   EDGE_MAT.opacity = m === 'xray' ? 0.55 : 0.85;
+  renderer.shadowMap.needsUpdate = true;
   if (post) post.ao.enabled = m === 'tex' && !S.lowPower;
   applyMaterials();
   syncOpts();
