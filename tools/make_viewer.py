@@ -105,6 +105,27 @@ def auto_colors(data):
     return key, ','.join(x for x in picks if x != cur)
 
 
+def viewer_version():
+    """Короткий отпечаток файлов просмотрщика — меняется при каждой правке, браузер берёт свежие файлы."""
+    import hashlib
+    h = hashlib.sha1()
+    vdir = os.path.join(REPO, 'viewer')
+    for f in sorted(os.listdir(vdir)):
+        if f.endswith(('.js', '.css')):
+            h.update(open(os.path.join(vdir, f), 'rb').read())
+    return h.hexdigest()[:8]
+
+
+def refresh_all_pages():
+    """Перегенерировать index.html всех проектов (после правок просмотрщика)."""
+    for d in sorted(os.listdir(REPO)):
+        f = os.path.join(REPO, d, 'model.json')
+        if os.path.isfile(f):
+            title = json.load(open(f, encoding='utf-8')).get('title') or d
+            write_index(os.path.join(REPO, d), title, d)
+            print('обновлено:', d)
+
+
 def write_index(out_dir, title, folder):
     with open(os.path.join(HERE, 'template.html'), encoding='utf-8') as f:
         html = f.read()
@@ -116,7 +137,7 @@ def write_index(out_dir, title, folder):
         og = ('<meta property="og:image" content="%spreview.jpg">\n'
               '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">\n'
               '<meta name="twitter:card" content="summary_large_image">') % url
-    html = html.replace('{{TITLE}}', title).replace('{{URL}}', url).replace('{{OG_IMAGE}}', og)
+    html = html.replace('{{TITLE}}', title).replace('{{URL}}', url).replace('{{OG_IMAGE}}', og).replace('{{V}}', viewer_version())
     with open(os.path.join(out_dir, 'index.html'), 'w', encoding='utf-8', newline='\n') as f:
         f.write(html)
     return url
@@ -175,4 +196,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if sys.argv[1:] == ['--refresh-pages']:
+        refresh_all_pages()
+    else:
+        main()

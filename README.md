@@ -61,3 +61,6 @@ python tools/make_viewer.py "C:\…\шкаф.wrl" --code p16 --title "Шкаф �
 * Ввести или сменить токен бота и код мастера: `python tools/deploy_notes.py --secrets`
   (вводятся скрыто; бот должен быть запущен кнопкой «Старт»; в Telegram придёт проверочное сообщение).
 * Выложить изменённый `backend/index.py`, не трогая настройки: `python tools/deploy_notes.py`.
+
+После правок в `viewer/` выполните `python tools/make_viewer.py --refresh-pages` — у всех проектов обновится
+номер версии файлов, и браузеры клиентов сразу возьмут новый просмотрщик, а не старый из кэша.
