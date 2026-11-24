@@ -7,6 +7,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import CONFIG from './config.js';
+import { createPost, enhanceMaterials, buildRoom } from './realism.js';
 
 const DRACO_PATH = 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/gltf/';
 const MM = 0.001;
@@ -62,7 +63,9 @@ const S = {
 
 // ------------------------------------------------------------------ сцена
 const stage = $('#stage');
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
+// фон прозрачный — его цвет задаёт страница, поэтому он не искажается тон-маппингом
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
+renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -78,7 +81,7 @@ labels.setSize(innerWidth, innerHeight);
 const scene = new THREE.Scene();
 const BG_LIGHT = new THREE.Color('#f4efe8');
 const BG_DARK = new THREE.Color('#1d1a17');
-scene.background = BG_LIGHT.clone();
+scene.background = null;
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
@@ -89,6 +92,11 @@ controls.dampingFactor = 0.09;
 controls.screenSpacePanning = true;
 controls.maxPolarAngle = Math.PI * 0.95;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+// постобработка: мягкие тени в углах и стыках (если видеокарта не тянет — отключится сама)
+let post = null;
+try { post = createPost(renderer, scene, camera, { mobile: isTouch }); } catch (e) { console.warn('без постобработки', e); }
+function draw() { if (post) post.render(); else renderer.render(scene, camera); }
 
 const hemi = new THREE.HemisphereLight(0xffffff, 0xd8cfc4, 0.55);
 scene.add(hemi);
@@ -296,7 +304,6 @@ function setup(root) {
       if (info.room) {
         m.receiveShadow = info.kind !== 'wall';
         m.castShadow = false;
-        if (info.kind === 'wall') { m.material.depthWrite = false; m.renderOrder = 2; }
         S.roomMeshes.push(m);
       } else {
         m.castShadow = true;
@@ -332,6 +339,9 @@ function setup(root) {
   controls.maxDistance = r * 8;
   controls.minDistance = 0.15;
 
+  enhanceMaterials(S.partMeshes, renderer);
+  S.room = buildRoom({ scene, renderer, roomMeshes: S.roomMeshes, parts: S.parts, MM });
+  if (S.room) floor.position.y -= 0.002;
   buildMovers();
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
@@ -566,6 +576,7 @@ function setMode(m) {
     if (mesh.userData.edges) mesh.userData.edges.visible = m !== 'tex';
   }
   EDGE_MAT.opacity = m === 'xray' ? 0.55 : 0.85;
+  if (post) post.ao.enabled = m === 'tex' && !S.lowPower;
   applyMaterials();
   syncOpts();
   if (m === 'xray') toast('Детали стали прозрачными — видно полки и внутреннее устройство');
@@ -605,7 +616,6 @@ function applyMaterials() {
 function toggleDark() {
   S.dark = !S.dark;
   document.body.classList.toggle('dark', S.dark);
-  scene.background = S.dark ? BG_DARK.clone() : BG_LIGHT.clone();
   floorMat.color.set(S.dark ? 0x2b2622 : 0xebe3d8);
   EDGE_MAT.color.set(S.dark ? 0x1a1613 : 0x3a332d);
   hemi.intensity = S.dark ? 0.4 : 0.55;
@@ -649,7 +659,7 @@ function pick(ev, withRoom = false) {
   const vis = S.partMeshes.filter((m) => m.visible);
   const hit = ray.intersectObjects(vis, false)[0];
   if (hit) return hit;
-  if (withRoom && S.roomGroup.visible) return ray.intersectObjects(S.roomMeshes, false)[0] || null;
+  if (withRoom && S.roomGroup.visible) return ray.intersectObjects(S.roomMeshes.filter((m) => m.visible), false)[0] || null;
   return null;
 }
 function select(hit) {
@@ -766,11 +776,15 @@ function measureClick(hit) {
 function snapshot() {
   closePops();
   clearTag();
-  renderer.render(scene, camera);
+  if (new URLSearchParams(location.search).has('savepreview')) { renderPreview(); return; }
+  S.room?.update(camera, S.roomGroup.visible, !!S.life);
+  draw();
   const src = renderer.domElement;
   const c = document.createElement('canvas');
   c.width = src.width; c.height = src.height;
   const g = c.getContext('2d');
+  g.fillStyle = '#' + (S.dark ? BG_DARK : BG_LIGHT).getHexString();
+  g.fillRect(0, 0, c.width, c.height);
   g.drawImage(src, 0, 0);
   const s = c.width / 1200;
   g.font = `800 ${Math.round(22 * s)}px Montserrat, sans-serif`;
@@ -792,6 +806,35 @@ function snapshot() {
   toast('Снимок сохранён');
 }
 // для разработчика: локальный сервер (tools/serve.py) сохраняет preview.jpg рядом с моделью
+// превью для мессенджеров: отдельный кадр 1200×630 с видом «объём», без интерфейса
+function renderPreview() {
+  const W = 1200, H = 630, pr = renderer.getPixelRatio();
+  const saved = { pos: camera.position.clone(), target: controls.target.clone(), aspect: camera.aspect, fov: camera.fov };
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  post?.setSize(W, H);
+  camera.aspect = W / H;
+  camera.fov = 40;
+  camera.updateProjectionMatrix();
+  const dir = new THREE.Vector3(0.55, 0.3, 1).normalize();
+  const d = fitBox(dir, S.center, 40) * 0.92;
+  camera.position.copy(S.center).addScaledVector(dir, d);
+  camera.lookAt(S.center);
+  S.room?.update(camera, S.roomGroup.visible, false);
+  draw();
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#' + BG_LIGHT.getHexString();
+  g.fillRect(0, 0, W, H);
+  g.drawImage(renderer.domElement, 0, 0);
+  renderer.setPixelRatio(pr);
+  renderer.setSize(innerWidth, innerHeight);
+  post?.setSize(innerWidth, innerHeight);
+  camera.aspect = saved.aspect; camera.fov = saved.fov; camera.updateProjectionMatrix();
+  camera.position.copy(saved.pos); controls.target.copy(saved.target);
+  savePreview(c);
+}
 function savePreview(c) {
   const t = document.createElement('canvas');
   t.width = 1200; t.height = 630;
@@ -1095,6 +1138,7 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  post?.setSize(innerWidth, innerHeight);
   labels.setSize(innerWidth, innerHeight);
 });
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.pop,.tool,.chipbtn')) closePops(); });
@@ -1115,11 +1159,30 @@ function loop() {
     camera.position.copy(controls.target).add(off);
   }
   if (!S.tour) controls.update();
-  renderer.render(scene, camera);
+  S.room?.update(camera, S.roomGroup.visible, !!S.life);
+  draw();
+  watchFps(dt);
   labels.render(scene, camera);
 }
 
-window.bvs = { S, camera, controls, scene, setView, setMode }; // для отладки в консоли
+// если кадров мало (слабый телефон) — выключаем мягкие тени и снижаем чёткость
+let fpsAcc = 0, fpsN = 0;
+function watchFps(dt) {
+  if (S.lowPower || !S.root || fpsN < 0) return;
+  fpsAcc += dt; fpsN++;
+  if (fpsN === 90) {
+    if (fpsAcc / fpsN > 1 / 26) {
+      S.lowPower = true;
+      if (post) post.ao.enabled = false;
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
+      renderer.setSize(innerWidth, innerHeight);
+      post?.setSize(innerWidth, innerHeight);
+    }
+    fpsN = -1;
+  }
+}
+
+window.bvs = { S, camera, controls, scene, setView, setMode, post, renderer }; // для отладки в консоли
 load().catch((e) => {
   console.error(e);
   $('#loader p').textContent = 'Не удалось загрузить модель. Обновите страницу.';

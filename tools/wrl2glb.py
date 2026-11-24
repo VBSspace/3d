@@ -38,7 +38,7 @@ APPLIANCES = re.compile(r'^(Tekhnika|Bytovaya_tekhnika)$', re.I)
 
 DOOR_ANGLE = 75          # градусов
 SLIDE_PART = 0.8         # ход выдвижного = 80 % глубины
-TEX_MAX = 1024           # пикселей по большей стороне
+TEX_MAX = 2048           # пикселей по большей стороне (текстуры декоров не уменьшаются)
 
 
 # ---------------------------------------------------------------- материалы
@@ -106,7 +106,7 @@ def jpeg_bytes(path):
     if max(im.size) < 64:
         im = im.resize((64, 64), Image.NEAREST)
     buf = io.BytesIO()
-    im.save(buf, 'JPEG', quality=82, optimize=True, progressive=True)
+    im.save(buf, 'JPEG', quality=88, optimize=True, progressive=True)
     return buf.getvalue(), im.size
 
 

@@ -67,13 +67,13 @@ def color_options(spec, out_dir, cat):
         m = re.search(r'«([^»]+)»', rec[0]) if rec else None
         name = '%s (%s)' % (m.group(1), code) if m else code
         im = Image.open(hits[0]).convert('RGB')
-        s = min(1.0, 1024 / max(im.size))
+        s = min(1.0, 2048 / max(im.size))
         if s < 1:
             im = im.resize((int(im.size[0] * s), int(im.size[1] * s)), Image.LANCZOS)
         if max(im.size) < 64:
             im = im.resize((64, 64))
         dst = os.path.join(out_dir, 'textures', code + '.jpg')
-        im.save(dst, 'JPEG', quality=82, optimize=True, progressive=True)
+        im.save(dst, 'JPEG', quality=88, optimize=True, progressive=True)
         opts.append({'name': name, 'texture': 'textures/%s.jpg' % code})
     return opts
 
