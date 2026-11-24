@@ -54,14 +54,9 @@ python tools/make_viewer.py "C:\…\шкаф.wrl" --code p16 --title "Шкаф �
 Ключей в коде страницы нет: функция ходит в бакет по IAM-токену своего сервисного аккаунта,
 код мастера и токен бота — переменные окружения функции.
 
-Настройка (один раз):
-1. https://console.yandex.cloud — войти через Яндекс ID, создать платёжный аккаунт.
-2. Object Storage → создать бакет `bvsspace-notes` (доступ: ограниченный).
-3. Сервисные аккаунты → `notes-fn` с ролью `storage.editor`.
-4. Cloud Functions → `bvs-notes`, среда Python 3.12, точка входа `index.handler`, код — `backend/index.py`,
-   сервисный аккаунт `notes-fn`, сделать функцию публичной. Переменные окружения:
-   `BUCKET=bvsspace-notes`, `ADMIN_CODE=<придумать>`, `TG_BOT_TOKEN`, `TG_CHAT_ID`,
-   `SITE_URL=https://vbsspace.github.io/3d/`, `ALLOWED_ORIGINS=https://vbsspace.github.io`.
-5. Telegram: создать бота у @BotFather, нажать у бота «Старт», `python tools/tg_chat_id.py ТОКЕН` → chat_id.
-6. Адрес функции (`https://functions.yandexcloud.net/…`) вписать в `viewer/config.js` → `api`, закоммитить.
-   Пока `api` пустой, кнопка «Замечание» скрыта.
+Уже настроено: бакет `bvsspace-notes` (закрытый, лимит 1 ГБ), сервисный аккаунт `notes-fn`
+(роль `storage.editor`), публичная функция `bvs-notes` — её адрес записан в `viewer/config.js`.
+
+* Ввести или сменить токен бота и код мастера: `python tools/deploy_notes.py --secrets`
+  (вводятся скрыто; бот должен быть запущен кнопкой «Старт»; в Telegram придёт проверочное сообщение).
+* Выложить изменённый `backend/index.py`, не трогая настройки: `python tools/deploy_notes.py`.

@@ -9,6 +9,7 @@
 import http.server
 import json
 import os
+import re
 import sys
 import urllib.parse
 
@@ -57,7 +58,7 @@ class H(http.server.SimpleHTTPRequestHandler):
             return self._api('GET')
         if p == '/viewer/config.js':
             with open(os.path.join(ROOT, 'viewer', 'config.js'), encoding='utf-8') as f:
-                js = f.read().replace("api: ''", "api: '/api'")
+                js = re.sub(r"api: '[^']*'", "api: '/api'", f.read(), count=1)
             b = js.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/javascript; charset=utf-8')

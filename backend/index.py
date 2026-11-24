@@ -207,7 +207,7 @@ def handler(event, context):
     raw = event.get('body') or ''
     if event.get('isBase64Encoded') and raw:
         import base64
-        raw = base64.b64decode(raw).decode('utf-8')
+        raw = base64.b64decode(raw).decode('utf-8', errors='replace')
     try:
         body = json.loads(raw) if raw else {}
         if not isinstance(body, dict):
