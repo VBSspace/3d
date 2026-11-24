@@ -4,7 +4,6 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
 // ------------------------------------------------------------------ постобработка
 export function createPost(renderer, scene, camera, { mobile }) {
@@ -188,11 +187,12 @@ function haloTexture() {
   return haloTex;
 }
 
-export function buildLeds({ parts, meshOf, MM, mobile }) {
+export function buildLeds({ parts, meshOf, MM, mobile, solids }) {
   const leds = [];
   const list = [...parts.values()].filter((p) => p.kind === 'light' && p.light);
   if (!list.length) return null;
-  RectAreaLightUniformsLib.init();
+  const ray = new THREE.Raycaster();
+  let shadowed = 0;
   for (const p of list) {
     const L = p.light;
     const mesh = meshOf(p.id);
@@ -206,7 +206,7 @@ export function buildLeds({ parts, meshOf, MM, mobile }) {
     const up = new THREE.Vector3().crossVectors(along, dir).normalize();   // правая тройка: x=вдоль, z=−свет
     const basis = new THREE.Matrix4().makeBasis(along, up, dir.clone().negate());
     // рассеиватель (не участвует в тон-маппинге — ярче белого, даёт ореол)
-    const stripMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(1.6), toneMapped: false, side: THREE.DoubleSide });
+    const stripMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(2.6), toneMapped: false, side: THREE.DoubleSide });
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(len, w), stripMat);
     strip.quaternion.setFromRotationMatrix(basis);
     strip.position.copy(pos);
@@ -214,23 +214,44 @@ export function buildLeds({ parts, meshOf, MM, mobile }) {
     mesh.add(strip);
     // ореол
     const halo = new THREE.Mesh(new THREE.PlaneGeometry(len + 0.08, w + 0.07), new THREE.MeshBasicMaterial({
-      map: haloTexture(), color: c, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending,
+      map: haloTexture(), color: c, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending,
       depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
     halo.quaternion.copy(strip.quaternion);
     halo.position.copy(pos).addScaledVector(dir, 0.0015);
     halo.raycast = () => {};
     halo.renderOrder = 3;
     mesh.add(halo);
-    // источник света: прямоугольник длиной с профиль, светит наружу
-    const light = new THREE.RectAreaLight(c, mobile ? 18 : 24, len, Math.max(w, 0.02));
-    light.position.copy(pos);
-    light.quaternion.setFromRotationMatrix(basis);
-    mesh.add(light);
-    leds.push({ strip, halo, light, stripMat, base: c });
+    // свет: прожекторы вдоль профиля (через каждые ~45 см) с тенями и затуханием до ближайшей детали —
+    // свет останавливается на полке/ящике и не «пробивает» до пола
+    ray.set(pos.clone().addScaledVector(dir, 0.002), dir);
+    const hit = ray.intersectObjects(solids.filter((m) => m !== mesh), false)[0];
+    const reach = hit ? hit.distance : 1.0;
+    const distance = Math.min(Math.max(reach * 1.7, 0.25), 1.6);
+    const n = Math.max(1, Math.round(len / 0.45));
+    const lights = [];
+    for (let i = 0; i < n; i++) {
+      const at = pos.clone().addScaledVector(along, ((i + 0.5) / n - 0.5) * len);
+      const spot = new THREE.SpotLight(c, (mobile ? 1.6 : 1.8) / n * Math.max(1, len / 0.45), distance, 1.25, 1.0, 1.6);
+      spot.position.copy(at);
+      spot.target.position.copy(at).add(dir);
+      if (shadowed < (mobile ? 4 : 8)) {
+        shadowed++;
+        spot.castShadow = true;
+        spot.shadow.mapSize.set(mobile ? 256 : 512, mobile ? 256 : 512);
+        spot.shadow.camera.near = 0.01;
+        spot.shadow.camera.far = distance;
+        spot.shadow.bias = -0.0005;
+        spot.shadow.radius = 4;
+        spot.shadow.blurSamples = 8;
+      }
+      mesh.add(spot, spot.target);
+      lights.push(spot);
+    }
+    leds.push({ strip, halo, lights, stripMat, base: c });
   }
   return {
     leds,
-    set(on) { for (const l of leds) { l.strip.visible = l.halo.visible = l.light.visible = on; } },
-    evening(on) { for (const l of leds) l.halo.material.opacity = on ? 0.9 : 0.55; },
+    set(on) { for (const l of leds) { l.strip.visible = l.halo.visible = on; l.lights.forEach((x) => (x.visible = on)); } },
+    evening(on) { for (const l of leds) l.halo.material.opacity = on ? 1 : 0.75; },
   };
 }

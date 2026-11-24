@@ -355,7 +355,9 @@ function setup(root) {
   if (S.room) floor.position.y -= 0.002;
   buildMovers();
   renderer.shadowMap.needsUpdate = true;
-  S.leds = buildLeds({ parts: S.parts, meshOf: partObject, MM, mobile: isTouch });
+  scene.updateMatrixWorld(true);
+  S.leds = buildLeds({ parts: S.parts, meshOf: partObject, MM, mobile: isTouch,
+    solids: [...S.partMeshes, ...S.roomMeshes].filter((m) => S.parts.get(m.userData.pid)?.kind !== 'light') });
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
   if (fm?.map?.image) {
