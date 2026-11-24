@@ -356,7 +356,6 @@ function setup(root) {
   buildMovers();
   renderer.shadowMap.needsUpdate = true;
   S.leds = buildLeds({ parts: S.parts, meshOf: partObject, MM, mobile: isTouch });
-  if (S.leds && post) post.bloom.enabled = true;
   // текстура фасада (для образца «как в проекте»)
   const fm = findMaterial(d.facade?.material);
   if (fm?.map?.image) {
@@ -652,7 +651,7 @@ function toggleEvening() {
       m.envMapIntensity = m.userData.envBase * (S.evening ? 0.15 : 1);
     }
   });
-  if (post) post.bloom.strength = S.evening ? 0.9 : 0.55;
+  S.leds?.evening(S.evening);
   toast(S.evening ? 'Вечерний свет — видно подсветку' : 'Дневной свет');
   syncOpts();
 }
@@ -1208,7 +1207,7 @@ function watchFps(dt) {
   if (fpsN === 90) {
     if (fpsAcc / fpsN > 1 / 26) {
       S.lowPower = true;
-      if (post) { post.ao.enabled = false; post.bloom.enabled = false; }
+      if (post) post.ao.enabled = false;
       renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
       renderer.setSize(innerWidth, innerHeight);
       post?.setSize(innerWidth, innerHeight);

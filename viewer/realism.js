@@ -4,7 +4,6 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
 // ------------------------------------------------------------------ постобработка
@@ -22,13 +21,9 @@ export function createPost(renderer, scene, camera, { mobile }) {
     samples: mobile ? 8 : 16, distanceFallOff: 1.0, screenSpaceRadius: false });
   ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: mobile ? 6 : 8, rings: 2, samples: mobile ? 8 : 16 });
   composer.addPass(ao);
-  // ореол только у очень ярких точек — светодиодных лент (обычные поверхности не светятся)
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.35, 1.0);
-  bloom.enabled = false;
-  composer.addPass(bloom);
   composer.addPass(new OutputPass());
   return {
-    composer, ao, bloom,
+    composer, ao,
     render() { composer.render(); },
     setSize(w, h) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); },
   };
@@ -169,6 +164,30 @@ function kelvin(t) {
  * Светодиодные профили/ленты: светящийся рассеиватель + прямоугольный источник света вдоль профиля.
  * Всё крепится к самой детали — если она в ящике или на двери, свет едет вместе с ней.
  */
+// мягкий ореол вокруг ленты: текстура «капсула» с плавным краем, складывается со сценой
+let haloTex = null;
+function haloTexture() {
+  if (haloTex) return haloTex;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  const img = g.createImageData(256, 64);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 256; x++) {
+      const dx = Math.max(0, Math.abs(x - 127.5) - 96) / 32;   // края по длине
+      const dy = Math.abs(y - 31.5) / 32;
+      const d = Math.min(1, Math.hypot(dx, dy));
+      const a = Math.pow(1 - d, 2.2);
+      const i = (y * 256 + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * 255);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  haloTex = new THREE.CanvasTexture(c);
+  return haloTex;
+}
+
 export function buildLeds({ parts, meshOf, MM, mobile }) {
   const leds = [];
   const list = [...parts.values()].filter((p) => p.kind === 'light' && p.light);
@@ -187,21 +206,31 @@ export function buildLeds({ parts, meshOf, MM, mobile }) {
     const up = new THREE.Vector3().crossVectors(along, dir).normalize();   // правая тройка: x=вдоль, z=−свет
     const basis = new THREE.Matrix4().makeBasis(along, up, dir.clone().negate());
     // рассеиватель (не участвует в тон-маппинге — ярче белого, даёт ореол)
-    const stripMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(4), toneMapped: false, side: THREE.DoubleSide });
+    const stripMat = new THREE.MeshBasicMaterial({ color: c.clone().multiplyScalar(1.6), toneMapped: false, side: THREE.DoubleSide });
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(len, w), stripMat);
     strip.quaternion.setFromRotationMatrix(basis);
     strip.position.copy(pos);
     strip.raycast = () => {};
     mesh.add(strip);
+    // ореол
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(len + 0.08, w + 0.07), new THREE.MeshBasicMaterial({
+      map: haloTexture(), color: c, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending,
+      depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+    halo.quaternion.copy(strip.quaternion);
+    halo.position.copy(pos).addScaledVector(dir, 0.0015);
+    halo.raycast = () => {};
+    halo.renderOrder = 3;
+    mesh.add(halo);
     // источник света: прямоугольник длиной с профиль, светит наружу
     const light = new THREE.RectAreaLight(c, mobile ? 18 : 24, len, Math.max(w, 0.02));
     light.position.copy(pos);
     light.quaternion.setFromRotationMatrix(basis);
     mesh.add(light);
-    leds.push({ strip, light, stripMat, base: c });
+    leds.push({ strip, halo, light, stripMat, base: c });
   }
   return {
     leds,
-    set(on) { for (const l of leds) { l.strip.visible = on; l.light.visible = on; } },
+    set(on) { for (const l of leds) { l.strip.visible = l.halo.visible = l.light.visible = on; } },
+    evening(on) { for (const l of leds) l.halo.material.opacity = on ? 0.9 : 0.55; },
   };
 }
