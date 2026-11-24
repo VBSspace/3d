@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -80,14 +81,22 @@ def ask_secrets(env):
     if not token:
         sys.exit('Не получилось. Запустите скрипт ещё раз.')
     clear_clipboard()
+    print('Токен принят.')
     chats = {}
-    for u in tg(token, 'getUpdates').get('result', []):
-        c = (u.get('message') or {}).get('chat') or {}
-        if c.get('type') == 'private':
-            chats[c['id']] = c.get('username') or c.get('first_name') or ''
+    for attempt in range(60):
+        for u in tg(token, 'getUpdates').get('result', []):
+            c = (u.get('message') or {}).get('chat') or {}
+            if c.get('type') == 'private':
+                chats[c['id']] = c.get('username') or c.get('first_name') or ''
+        if chats:
+            break
+        if attempt == 0:
+            print('\nТеперь откройте в Telegram https://t.me/%s и нажмите «Старт» (или напишите боту «привет»).'
+                  % me['username'])
+            print('Жду…')
+        time.sleep(3)
     if not chats:
-        sys.exit('Бот @%s пока никто не запускал. Откройте его в Telegram, нажмите «Старт» и запустите скрипт ещё раз.'
-                 % me['username'])
+        sys.exit('Не дождался сообщения боту. Нажмите у @%s «Старт» и запустите скрипт ещё раз.' % me['username'])
     chat = next((cid for cid, u in chats.items() if u.lower() == 'bvs04'), next(iter(chats)))
     tg(token, 'sendMessage', chat_id=chat,
        text='✅ Бот подключён. Сюда будут приходить новые замечания клиентов с 3D-моделей BVSspace.')
