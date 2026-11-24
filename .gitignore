@@ -1,0 +1,4 @@
+.local-notes/
+__pycache__/
+*.pyc
+.claude/
