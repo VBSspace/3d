@@ -245,13 +245,26 @@ export function buildLeds({ parts, meshOf, MM, mobile, solids }) {
         spot.shadow.blurSamples = 8;
       }
       mesh.add(spot, spot.target);
+      spot.userData.base = spot.intensity;
       lights.push(spot);
     }
     leds.push({ strip, halo, lights, stripMat, base: c });
   }
   return {
     leds,
+    temp: list[0]?.light.temp || 4000, level: 1, eve: false,
     set(on) { for (const l of leds) { l.strip.visible = l.halo.visible = on; l.lights.forEach((x) => (x.visible = on)); } },
-    evening(on) { for (const l of leds) l.halo.material.opacity = on ? 1 : 0.75; },
+    evening(on) { this.eve = on; this.apply(); },
+    color(t) { this.temp = t; this.apply(); },
+    brightness(k) { this.level = k; this.apply(); },
+    apply() {
+      const c = kelvin(this.temp), k = this.level;
+      for (const l of leds) {
+        l.stripMat.color.copy(c).multiplyScalar(2.6 * (0.45 + 0.55 * k));
+        l.halo.material.color.copy(c);
+        l.halo.material.opacity = Math.min(1, (this.eve ? 1 : 0.75) * k);
+        for (const x of l.lights) { x.color.copy(c); x.intensity = x.userData.base * k; }
+      }
+    },
   };
 }

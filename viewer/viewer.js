@@ -144,7 +144,7 @@ function buildUI() {
   tools.push(tool('life', 'person', 'Как в жизни', toggleLife));
   if (d.facade?.material && d.facade.options?.length) tools.push(tool('colors', 'palette', 'Цвет фасадов', () => togglePop('colors')));
   tools.push(tool('xray', 'xray', 'Заглянуть внутрь', () => setMode(S.mode === 'xray' ? 'tex' : 'xray')));
-  if (S.leds) tools.push(tool('leds', 'bulb', 'Подсветка', toggleLeds));
+  if (S.leds) tools.push(tool('leds', 'bulb', 'Подсветка', () => togglePop('leds')));
   if (CONFIG.api) tools.push(tool('notes', 'note', 'Замечание', toggleNotesMode));
   tools.push(el('span', 'sep'));
   tools.push(tool('views', 'view', 'Вид', () => togglePop('views')));
@@ -170,7 +170,6 @@ function buildUI() {
     opt('xray', 'Заглянуть внутрь', () => setMode('xray'), 'mode-xray'),
     opt('moon', 'Тёмный фон', toggleDark, 'opt-dark'),
   );
-  if (S.leds) g1.append(opt('bulb', 'Вечерний свет', toggleEvening, 'opt-evening'));
   pm.append(g1);
   pm.append(el('h4', null, 'Инструменты'));
   const g2 = el('div', 'grid');
@@ -214,6 +213,34 @@ function buildUI() {
     pc.append(el('p', 'where', 'Цвет меняется у всех деталей из этого материала. Оттенок на экране может отличаться от образца.'));
   }
 
+  // меню «Подсветка»: вкл/выкл, цвет света, яркость, вечерний свет
+  if (S.leds) {
+    const pl = el('div', 'pop', '');
+    pl.id = 'pop-leds';
+    document.body.append(pl);
+    pl.innerHTML = '<h4>Подсветка</h4>';
+    const g0 = el('div', 'grid');
+    g0.append(opt('bulb', 'Включена', () => { if (!S.ledsOn) toggleLeds(); }, 'led-on'),
+      opt('close', 'Выключена', () => { if (S.ledsOn) toggleLeds(); }, 'led-off'));
+    pl.append(g0, el('h4', null, 'Цвет света'));
+    const gc = el('div', 'grid');
+    for (const [t, name, col] of [[3000, 'Тёплый<br>3000 K', '#ffb46b'], [4000, 'Нейтральный<br>4000 K', '#ffe2c0'], [6000, 'Холодный<br>6000 K', '#eef3ff']]) {
+      const b = el('button', 'opt', `<span class="lamp" style="background:${col}"></span><span>${name}</span>`);
+      b.dataset.temp = t;
+      b.onclick = (e) => { e.stopPropagation(); if (!S.ledsOn) toggleLeds(); S.leds.color(t); syncOpts(); };
+      gc.append(b);
+    }
+    pl.append(gc, el('h4', null, 'Яркость'));
+    const row = el('div', 'range', `<input type="range" min="20" max="200" step="5" value="100" aria-label="Яркость подсветки"><b>100 %</b>`);
+    const rng = row.querySelector('input');
+    rng.oninput = () => { if (!S.ledsOn) toggleLeds(); S.leds.brightness(rng.value / 100); row.querySelector('b').textContent = rng.value + ' %'; };
+    pl.append(row);
+    const ge = el('div', 'grid');
+    ge.style.marginTop = '14px';
+    ge.append(opt('moon', 'Вечерний свет', toggleEvening, 'opt-evening'));
+    pl.append(ge);
+  }
+
   const foot = $('.foot');
   foot.innerHTML = `<a href="${CONFIG.calcUrl}" target="_blank" rel="noopener">Рассчитать свой проект</a>`;
 }
@@ -255,8 +282,10 @@ function syncOpts() {
   $('#opt-appl')?.classList.toggle('on', S.applMeshes[0]?.visible);
   $('#t-life')?.classList.toggle('on', S.life);
   $('#t-notes')?.classList.toggle('on', S.notesMode);
-  $('#t-leds')?.classList.toggle('on', !!S.ledsOn);
   $('#opt-evening')?.classList.toggle('on', !!S.evening);
+  $('#led-on')?.classList.toggle('on', !!S.ledsOn);
+  $('#led-off')?.classList.toggle('on', S.leds ? !S.ledsOn : false);
+  document.querySelectorAll('#pop-leds [data-temp]').forEach((b) => b.classList.toggle('on', S.ledsOn && +b.dataset.temp === S.leds.temp));
   const anyOpen = S.movers.some((m) => m.target > 0.5);
   const oa = $('#t-openall');
   if (oa) oa.innerHTML = (anyOpen ? ICON.close : ICON.open) + `<span>${anyOpen ? 'Закрыть всё' : 'Открыть всё'}</span>`;
@@ -666,7 +695,6 @@ function toggleEvening() {
   });
   S.leds?.evening(S.evening);
   if (S.evening && S.leds && !S.ledsOn) toggleLeds();
-  closePops();
   toast(S.evening ? 'Вечерний свет — видно подсветку' : 'Дневной свет');
   syncOpts();
 }
