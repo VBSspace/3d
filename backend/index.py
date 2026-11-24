@@ -81,20 +81,44 @@ class FileStore:
 
 # ---------------------------------------------------------------- Telegram
 
-def notify(project, note, site):
+def _send_telegram(text):
+    """Прямо в Telegram (из Yandex Cloud сейчас недоступно — оставлено на случай, если заработает)."""
     token, chat = env('TG_BOT_TOKEN'), env('TG_CHAT_ID')
-    if not token or not chat:
-        return
+    data = urllib.parse.urlencode({'chat_id': chat, 'text': text, 'disable_web_page_preview': 'true'}).encode()
+    urllib.request.urlopen('https://api.telegram.org/bot%s/sendMessage' % token, data=data, timeout=4).close()
+
+
+def _send_via_github(text):
+    """Через GitHub Actions: workflow .github/workflows/notify.yml отправит сообщение в Telegram."""
+    body = json.dumps({'event_type': 'note', 'client_payload': {'text': text}}).encode('utf-8')
+    req = urllib.request.Request('https://api.github.com/repos/%s/dispatches' % env('GH_REPO', 'VBSspace/3d'),
+                                 data=body, method='POST')
+    req.add_header('Authorization', 'Bearer ' + env('GH_DISPATCH_TOKEN'))
+    req.add_header('Accept', 'application/vnd.github+json')
+    req.add_header('User-Agent', 'bvsspace-notes')
+    urllib.request.urlopen(req, timeout=8).close()
+
+
+def notify(project, note, site):
     link = '%s%s/#note=%d' % (site, project, note['n'])
     text = ('📍 Новое замечание №%d — %s\n'
             'Место: %s\n\n«%s»\n%s\n%s') % (
         note['n'], project, note.get('partName') or '—', note['text'],
         ('— ' + note['author']) if note.get('author') else '', link)
-    data = urllib.parse.urlencode({'chat_id': chat, 'text': text, 'disable_web_page_preview': 'true'}).encode()
     try:
-        urllib.request.urlopen('https://api.telegram.org/bot%s/sendMessage' % token, data=data, timeout=8).close()
-    except Exception as e:  # уведомление не должно ломать сохранение
-        print('telegram error', e)
+        if env('GH_DISPATCH_TOKEN'):
+            _send_via_github(text)
+        elif env('TG_BOT_TOKEN') and env('TG_CHAT_ID'):
+            _send_telegram(text)
+        else:
+            return 'not configured'
+        return 'ok'
+    except urllib.error.HTTPError as e:  # уведомление не должно ломать сохранение
+        print('notify error', e.code)
+        return 'error %s' % e.code
+    except Exception as e:
+        print('notify error', type(e).__name__)
+        return 'error ' + type(e).__name__
 
 
 # ---------------------------------------------------------------- логика
@@ -157,8 +181,8 @@ def handle(method, project, body, store, admin_code, site):
             note['view'] = {'pos': vpos, 'target': vtgt}
         notes.append(note)
         store.save(project, data)
-        notify(project, note, site)
-        return 200, {'note': note, 'notes': notes}
+        notified = notify(project, note, site) == 'ok'
+        return 200, {'note': note, 'notes': notes, 'notified': notified}
 
     if action in ('reply', 'status', 'delete'):
         if not is_admin:

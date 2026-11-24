@@ -1,0 +1,23 @@
+# Ретранслятор уведомлений: функция в Yandex Cloud не может достучаться до Telegram
+# (api.telegram.org недоступен из российских дата-центров), поэтому она вызывает
+# этот workflow через GitHub API, а он отправляет сообщение уже из-за рубежа.
+name: Замечание → Telegram
+on:
+  repository_dispatch:
+    types: [note]
+permissions: {}
+jobs:
+  telegram:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Отправить сообщение
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TEXT: ${{ github.event.client_payload.text }}
+        run: |
+          curl -sS --fail -o /dev/null -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TG_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" \
+            --data-urlencode "disable_web_page_preview=true"

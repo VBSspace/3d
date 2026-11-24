@@ -877,7 +877,9 @@ function renderPins() {
   S.pins.clear();
   for (const n of S.notes) {
     const host = partObject(n.part) || S.root;
-    const div = el('div', 'pin' + (n.status === 'resolved' ? ' done' : ''), n.status === 'resolved' ? '✓' : String(n.n));
+    // внешний блок двигает CSS2DRenderer, внутренний — увеличивается при наведении (иначе метка «прыгает»)
+    const div = el('div', 'pinwrap');
+    div.append(el('div', 'pin' + (n.status === 'resolved' ? ' done' : ''), n.status === 'resolved' ? '✓' : String(n.n)));
     div.title = n.text;
     div.addEventListener('pointerdown', (e) => e.stopPropagation());
     div.onclick = (e) => { e.stopPropagation(); focusNote(n.n); };
@@ -911,7 +913,9 @@ function startDraft(hit) {
   const pid = hit.object.userData.pid;
   const p = S.parts.get(pid);
   const local = hit.object.worldToLocal(hit.point.clone());
-  const pin = new CSS2DObject(el('div', 'pin new', '+'));
+  const wrap = el('div', 'pinwrap');
+  wrap.append(el('div', 'pin new', '+'));
+  const pin = new CSS2DObject(wrap);
   pin.position.copy(local);
   hit.object.add(pin);
   S.draft = { pid, name: p.name, p: local.toArray().map((v) => Math.round(v / MM * 10) / 10), pin,
@@ -1018,7 +1022,7 @@ function focusNote(num, openList = true) {
     flyTo({ pos: wp.clone().add(new THREE.Vector3(0.35, 0.3, 1.2)), target: wp, fov: 40 }, 1.0);
   }
   if (mv && mv.target < 0.5 && n.view == null) setMover(mv, true);
-  if (pin) { pin.element.animate([{ scale: 1 }, { scale: 1.5 }, { scale: 1 }], { duration: 700, iterations: 2 }); }
+  if (pin) { pin.element.firstChild.animate([{ scale: 1 }, { scale: 1.5 }, { scale: 1 }], { duration: 700, iterations: 2 }); }
   if (openList) openSheet(`Замечания (${S.notes.length})`, (b) => renderNotesList(b, num));
   else document.querySelectorAll('#notes .note').forEach((c) => c.classList.toggle('sel', c.querySelector('.num')?.textContent == num));
 }

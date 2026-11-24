@@ -108,12 +108,69 @@ def ask_secrets(env):
     return code
 
 
+GH_REPO = 'VBSspace/3d'
+PAT_URL = ('https://github.com/settings/personal-access-tokens/new?name=bvs-notes'
+           '&description=BVSspace%3A+%D1%83%D0%B2%D0%B5%D0%B4%D0%BE%D0%BC%D0%BB%D0%B5%D0%BD%D0%B8%D1%8F'
+           '&target_name=VBSspace&expires_in=none&contents=write')
+
+
+def gh_api(token, path):
+    req = urllib.request.Request('https://api.github.com' + path)
+    req.add_header('Authorization', 'Bearer ' + token)
+    req.add_header('Accept', 'application/vnd.github+json')
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def ask_github(env):
+    """Telegram недоступен из Yandex Cloud — уведомления идут через GitHub Actions."""
+    if not env.get('TG_BOT_TOKEN') or not env.get('TG_CHAT_ID'):
+        sys.exit('Сначала подключите бота: python tools/deploy_notes.py --secrets')
+    print('\nНужен ключ GitHub, которым функция будет запускать отправку уведомления.')
+    print('1) Сейчас откроется страница GitHub «New fine-grained personal access token».')
+    print('2) В «Repository access» выберите «Only select repositories» → 3d.')
+    print('3) В «Permissions» → «Contents» должно стоять «Read and write» (обычно уже стоит).')
+    print('4) Внизу нажмите «Generate token», затем скопируйте ключ (github_pat_…) кнопкой-копированием.')
+    input('\nНажмите Enter, чтобы открыть страницу… ')
+    import webbrowser
+    webbrowser.open(PAT_URL)
+    pat = None
+    for _ in range(5):
+        input('\nСкопировали ключ github_pat_…? Нажмите Enter… ')
+        t = clipboard()
+        if not re.fullmatch(r'github_pat_[A-Za-z0-9_]{40,}', t):
+            print('В буфере обмена не ключ GitHub. Скопируйте строку, которая начинается с github_pat_.')
+            continue
+        try:
+            gh_api(t, '/repos/' + GH_REPO)
+        except Exception:
+            print('GitHub не принял ключ — проверьте, что выбран репозиторий 3d.')
+            continue
+        pat = t
+        break
+    if not pat:
+        sys.exit('Не получилось. Запустите ещё раз: python tools/deploy_notes.py --github')
+    clear_clipboard()
+    # токен бота и chat_id — в секреты репозитория (их видит только GitHub Actions)
+    for name in ('TG_BOT_TOKEN', 'TG_CHAT_ID'):
+        r = subprocess.run(['gh', 'secret', 'set', name, '--repo', GH_REPO], input=env[name],
+                           capture_output=True, text=True, encoding='utf-8')
+        if r.returncode:
+            sys.exit('Не удалось сохранить секрет %s в GitHub: %s' % (name, (r.stderr or '').strip()[:200]))
+    env['GH_DISPATCH_TOKEN'] = pat
+    env['GH_REPO'] = GH_REPO
+    print('Ключ принят, данные бота сохранены в секретах GitHub.')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--secrets', action='store_true', help='ввести токен бота и код мастера')
+    ap.add_argument('--github', action='store_true', help='уведомления через GitHub Actions (ключ github_pat_)')
     a = ap.parse_args()
     env = {**BASE_ENV, **current_env()}
     code = ask_secrets(env) if a.secrets else None
+    if a.github:
+        ask_github(env)
     sa = yc('iam', 'service-account', 'get', SERVICE_ACCOUNT)['id']
     src = tempfile.mkdtemp()
     shutil.copy(os.path.join(os.path.dirname(HERE), 'backend', 'index.py'), src)
@@ -124,6 +181,17 @@ def main():
        '--environment', ','.join('%s=%s' % kv for kv in env.items()))
     shutil.rmtree(src, ignore_errors=True)
     print('Готово.')
+    if a.github:
+        body = json.dumps({'event_type': 'note', 'client_payload': {
+            'text': '✅ Уведомления о замечаниях подключены (через GitHub). Сюда будут приходить замечания клиентов.'}}).encode()
+        req = urllib.request.Request('https://api.github.com/repos/%s/dispatches' % GH_REPO, data=body, method='POST')
+        req.add_header('Authorization', 'Bearer ' + env['GH_DISPATCH_TOKEN'])
+        req.add_header('Accept', 'application/vnd.github+json')
+        try:
+            urllib.request.urlopen(req, timeout=15).close()
+            print('Проверьте Telegram: через 20–40 секунд придёт тестовое сообщение «✅ Уведомления… подключены».')
+        except Exception as e:
+            print('Не удалось запустить проверку через GitHub:', e)
     if code:
         link = 'https://vbsspace.github.io/3d/p15-postirochnaya/#admin=' + code
         try:
