@@ -227,14 +227,42 @@ function buildUI() {
     for (const [t, name, col] of [[3000, 'Тёплый<br>3000 K', '#ffb46b'], [4000, 'Нейтральный<br>4000 K', '#ffe2c0'], [6000, 'Холодный<br>6000 K', '#eef3ff']]) {
       const b = el('button', 'opt', `<span class="lamp" style="background:${col}"></span><span>${name}</span>`);
       b.dataset.temp = t;
-      b.onclick = (e) => { e.stopPropagation(); if (!S.ledsOn) toggleLeds(); S.leds.color(t); syncOpts(); };
+      b.onclick = (e) => { e.stopPropagation(); if (!S.ledsOn) toggleLeds(); S.leds.color(t); syncOpts(); const c = $('#pop-leds .ledcalc'); if (c) c.innerHTML = ledSummaryHtml(S.ledW); };
       gc.append(b);
     }
-    pl.append(gc, el('h4', null, 'Яркость'));
-    const row = el('div', 'range', `<input type="range" min="20" max="200" step="5" value="100" aria-label="Яркость подсветки"><b>100 %</b>`);
+    // яркость = реальные стандартные ленты (Вт/м); 9,6 Вт/м — исходная яркость модели
+    pl.append(gc, el('h4', null, 'Яркость — какая лента'));
+    const row = el('div', 'range', `<input type="range" min="0" max="${STRIPS.length - 1}" step="1" value="${STRIP_DEFAULT}" aria-label="Мощность ленты"><b></b>`);
     const rng = row.querySelector('input');
-    rng.oninput = () => { if (!S.ledsOn) toggleLeds(); S.leds.brightness(rng.value / 100); row.querySelector('b').textContent = rng.value + ' %'; };
-    pl.append(row);
+    const calc = el('div', 'ledcalc');
+    const showStrip = () => {
+      const w = STRIPS[+rng.value];
+      S.ledW = w;
+      row.querySelector('b').textContent = `${fmt1(w)} Вт/м`;
+      calc.innerHTML = ledSummaryHtml(w);
+    };
+    rng.oninput = () => { if (!S.ledsOn) toggleLeds(); S.leds.brightness(STRIPS[+rng.value] / 9.6); showStrip(); };
+    showStrip();
+    pl.append(row, calc);
+    if (CONFIG.api) {
+      const send = el('button', 'sendchoice', 'Мне нравится так — отправить мастеру');
+      send.onclick = async (e) => {
+        e.stopPropagation();
+        send.disabled = true;
+        try {
+          const first = [...S.parts.values()].find((p) => p.kind === 'light' && p.light);
+          await api.post({ action: 'add', note: { part: first.id, partName: 'Подсветка', p: first.light.center,
+            text: 'Выбор подсветки: ' + ledSummaryText(S.ledW), author: store.get('bvs_name', ''),
+            view: { pos: camera.position.toArray(), target: controls.target.toArray() } } });
+          const r = await api.list();
+          S.notes = r.notes || [];
+          renderPins();
+          toast('Выбор подсветки отправлен мастеру');
+        } catch { toast('Не получилось отправить. Попробуйте ещё раз'); }
+        send.disabled = false;
+      };
+      pl.append(send);
+    }
     const ge = el('div', 'grid');
     ge.style.marginTop = '14px';
     ge.append(opt('moon', 'Вечерний свет', toggleEvening, 'opt-evening'));
@@ -670,6 +698,32 @@ function toggleDark() {
   hemi.intensity = S.dark ? 0.4 : 0.55;
   syncOpts();
 }
+// ------------------------------------------------------------------ подсветка: реальные ленты
+// стандартные ленты для мебели, Вт/м; световой поток ≈ 90 лм/Вт с учётом рассеивателя профиля
+const STRIPS = [2.4, 4.8, 7.2, 9.6, 12, 14.4, 19.2];
+const STRIP_DEFAULT = 3;
+const PSU = [12, 24, 36, 48, 60, 75, 100, 150, 200, 240, 320, 400];
+const fmt1 = (v) => String(Math.round(v * 10) / 10).replace('.', ',');
+function ledTotals(w) {
+  const list = [...S.parts.values()].filter((p) => p.kind === 'light' && p.light);
+  const meters = list.reduce((a, p) => a + p.light.len, 0) / 1000;
+  const watts = meters * w;
+  const psu = PSU.find((x) => x >= watts * 1.3) || Math.ceil(watts * 1.3);
+  return { n: list.length, meters, watts, psu, lm: Math.round(w * 90 / 10) * 10 };
+}
+const TEMP_NAME = { 3000: 'тёплый', 4000: 'нейтральный', 6000: 'холодный' };
+function ledSummaryHtml(w) {
+  const t = ledTotals(w);
+  return `<div><b>≈ ${t.lm} лм/м</b> · ${S.leds.temp} K (${TEMP_NAME[S.leds.temp] || ''})</div>` +
+    `<div>${t.n} ${t.n === 1 ? 'профиль' : t.n < 5 ? 'профиля' : 'профилей'}, всего ${fmt1(t.meters)} м ленты</div>` +
+    `<div>Мощность ≈ ${fmt1(t.watts)} Вт · блок питания от <b>${t.psu} Вт</b></div>`;
+}
+function ledSummaryText(w) {
+  const t = ledTotals(w);
+  return `${S.leds.temp} K (${TEMP_NAME[S.leds.temp] || ''}), лента ${fmt1(w)} Вт/м (≈ ${t.lm} лм/м), ` +
+    `${t.n} шт., всего ${fmt1(t.meters)} м, ≈ ${fmt1(t.watts)} Вт, блок питания от ${t.psu} Вт.`;
+}
+
 // «Подсветка»: включить / выключить светодиоды
 function toggleLeds() {
   S.ledsOn = !S.ledsOn;
