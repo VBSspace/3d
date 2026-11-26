@@ -153,6 +153,11 @@ def main():
     ap.add_argument('--colors', default='auto', help='варианты цвета фасадов: auto (по умолчанию), none, или коды декоров через запятую (H1145,U702) / Имя=#цвет')
     ap.add_argument('--door-angle', type=float, default=wrl2glb.DOOR_ANGLE)
     ap.add_argument('--eye', help='точка «как в жизни» вручную: x,z в мм (координаты Базиса)')
+    ap.add_argument('--wall-color', help='цвет стен, например #c8bfb3 (по умолчанию светлый)')
+    ap.add_argument('--bg-color', help='цвет фона страницы, например #d9d2c8 (по умолчанию #f4efe8)')
+    ap.add_argument('--exposure', type=float, help='яркость сцены (по умолчанию 1.05; 0.9 — приглушённее)')
+    ap.add_argument('--floor', help='пол: herringbone:#c4a27c — паркет «ёлочкой» указанного цвета (по умолчанию плитка)')
+    ap.add_argument('--alias', help='показать декор как другой: "tex:NCS S 1002-Y20R=tex:U216" (несколько — через ;)')
     ap.add_argument('--push', action='store_true', help='сразу закоммитить и отправить на GitHub')
     a = ap.parse_args()
 
@@ -180,6 +185,17 @@ def main():
     if a.eye:
         x, z = [float(v) for v in a.eye.split(',')]
         data['eye']['pos'] = [x, 1600, z]
+    if a.wall_color:
+        data['wallColor'] = a.wall_color if a.wall_color.startswith('#') else '#' + a.wall_color
+    if a.bg_color:
+        data['bgColor'] = a.bg_color if a.bg_color.startswith('#') else '#' + a.bg_color
+    if a.exposure:
+        data['exposure'] = a.exposure
+    if a.floor:
+        ft, _, fc = a.floor.partition(':')
+        data['floor'] = {'type': ft, 'color': fc or '#c4a27c'}
+    if a.alias:
+        data['materialAlias'] = dict(x.split('=', 1) for x in a.alias.split(';') if '=' in x)
     with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     url = write_index(out, a.title, folder)

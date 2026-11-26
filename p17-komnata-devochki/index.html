@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>Комната девочки — 3D-проект BVSspace</title>
+<meta name="description" content="Ваш проект мебели в 3D: покрутите, откройте двери, оставьте замечание.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Комната девочки — 3D-проект мебели">
+<meta property="og:description" content="Покрутите модель, откройте двери и ящики, оставьте замечание прямо на модели.">
+<meta property="og:url" content="https://vbsspace.github.io/3d/p17-komnata-devochki/">
+<meta property="og:image" content="https://vbsspace.github.io/3d/viewer/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="theme-color" content="#f4efe8">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' fill='%23fff' stroke='%23e07020' stroke-width='3'/%3E%3Ctext x='16' y='21' font-family='Arial' font-weight='800' font-size='12' text-anchor='middle' fill='%232b2724'%3EBVS%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../viewer/viewer.css?v=2c773a3f">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js">
+<link rel="preload" href="model.glb" as="fetch" crossorigin>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+"../viewer/realism.js":"../viewer/realism.js?v=2c773a3f",
+"../viewer/config.js":"../viewer/config.js?v=2c773a3f"}}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+<a class="mark" href="https://vbsspace.github.io/anketa/" target="_blank" rel="noopener"><b>BVS<span>space</span></b><small>мебель<br>на заказ</small></a>
+<div class="title"></div>
+<div class="topbar"></div>
+<div class="modechip"></div>
+<div class="pop" id="pop-views"></div>
+<div class="pop" id="pop-more"></div>
+<div class="pop" id="pop-colors"></div>
+<div class="dock-wrap"><div class="dock"></div><div class="foot"></div></div>
+<aside class="sheet" id="notes"><header><b>Замечания</b><button class="x" aria-label="Закрыть">×</button></header><div class="body"></div></aside>
+<div id="hint"></div>
+<div class="toast"></div>
+<div id="loader"><div class="mark"><b>BVS<span>space</span></b><small>мебель<br>на заказ</small></div><div class="bar"><i></i></div><p>Загружаем 3D-модель…</p></div>
+<script type="module" src="../viewer/viewer.js?v=2c773a3f"></script>
+</body>
+</html>

@@ -603,6 +603,29 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
             mx = np.maximum(mx, b)
         return mn, mx
 
+    def slide_dir(u, n, plist, mn, mx):
+        """Куда выдвигается ящик. Если ящик стоит на направляющих — по их длинной стороне, в сторону
+        лица ящика; иначе — от центра изделия к ящику; по умолчанию — вперёд (+Z)."""
+        # лицо ящика — самая большая вертикальная тонкая панель; ящик едет поперёк неё, в её сторону
+        best, best_area, best_ax = None, 0.0, None
+        faces = [p for p in plist if 'Фасад' in p['name']]
+        for p in (faces or plist):
+            if p['kind'] not in ('panel', 'facade'):
+                continue
+            e = part_bbox[p['id']][1] - part_bbox[p['id']][0]
+            for ax in (0, 2):
+                if e[ax] < 30 and e[1] >= 30:
+                    area = float(np.prod(np.delete(e, ax)))
+                    if area > best_area:
+                        best, best_area, best_ax = p, area, ax
+        if best is not None:
+            c = (mn[best_ax] + mx[best_ax]) / 2
+            fc = (part_bbox[best['id']][0][best_ax] + part_bbox[best['id']][1][best_ax]) / 2
+            if abs(fc - c) > 1:
+                v = np.zeros(3); v[best_ax] = 1.0 if fc > c else -1.0
+                return v
+        return front_default.copy()
+
     # выдвижные (сначала — чтобы двери внутри знали родителя)
     for u, n in sorted(nodes.items()):
         if SLIDE.search(n['name']) and u not in part_uids:
@@ -611,16 +634,37 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
                 continue
             # вложенный выдвижной внутри другого — допускается
             mn, mx = bbox_of(plist)
-            depth = float((mx - mn) @ np.abs(front_default))
+            if not any('Фасад' in p['name'] for p in plist):
+                # фасад ящика лежит рядом в изделии, а не в блоке «Ящик» — берём фасад прямо перед ящиком
+                top, g = n['parent'], 0
+                while top is not None and nodes[top]['parent'] is not None and g < 6 and not re.match(r'^\d', rus(nodes[top]['name'])):
+                    top = nodes[top]['parent']; g += 1
+                cand = []
+                for p in (parts_under(top) if top is not None else []):
+                    if p in plist or 'Фасад' not in p['name']:
+                        continue
+                    a, b = part_bbox[p['id']]
+                    e = b - a
+                    for ax in (0, 2):
+                        o = 2 - ax
+                        if e[ax] < 30 and a[1] >= mn[1] - 60 and b[1] <= mx[1] + 60 \
+                                and min(b[o], mx[o]) - max(a[o], mn[o]) > 0.6 * (mx[o] - mn[o]) \
+                                and (abs(a[ax] - mx[ax]) < 40 or abs(b[ax] - mn[ax]) < 40):
+                            cand.append(p)
+                if cand:
+                    plist = plist + [max(cand, key=lambda p: float(np.prod(part_bbox[p['id']][1] - part_bbox[p['id']][0] + 1)))]
+                    mn, mx = bbox_of(plist)
+            fwd = slide_dir(u, n, plist, mn, mx)
+            depth = float((mx - mn) @ np.abs(fwd))
             mid = 'm%d' % (len(movers) + 1)
             mover_of_uid[u] = mid
             # лицо ящика — передняя тонкая панель
             front = [p for p in plist if p['kind'] == 'panel'
-                     and (part_bbox[p['id']][1] - part_bbox[p['id']][0]) @ np.abs(front_default) < 30]
+                     and (part_bbox[p['id']][1] - part_bbox[p['id']][0]) @ np.abs(fwd) < 30]
             if front:
-                max(front, key=lambda p: part_bbox[p['id']][1] @ front_default)['kind'] = 'facade'
+                max(front, key=lambda p: part_bbox[p['id']][1] @ fwd)['kind'] = 'facade'
             movers.append({'id': mid, 'type': 'slide', 'name': rus(n['name']), 'uid': u,
-                           'dir': front_default.tolist(), 'dist': round(depth * SLIDE_PART),
+                           'dir': fwd.tolist(), 'dist': round(depth * SLIDE_PART),
                            'parts': [p['id'] for p in plist]})
 
     def door_axis(u, n):
@@ -650,6 +694,19 @@ def build(model_wrl, room_wrl, out_dir, title='', code='', draco=True, door_angl
             front = np.zeros(3)
             front[nrm] = 1.0
         hinges = [p for p in plist if p['name'].startswith('Петля')]
+        if not hinges and par is not None:
+            # петли иногда лежат не в блоке двери, а рядом в изделии — берём те, что у самого фасада
+            def _near(p, tol=40.0):
+                # центр петли — в пределах фасада по его плоскости (±5 мм) и не дальше tol по толщине:
+                # так петли соседней двери того же изделия не путаются
+                mn, mx = part_bbox[p['id']]
+                c = (mn + mx) / 2
+                for k in range(3):
+                    lim = tol if k == nrm else 5.0
+                    if c[k] < fmin[k] - lim or c[k] > fmax[k] + lim:
+                        return False
+                return True
+            hinges = [p for p in parts_under(par) if p not in plist and p['name'].startswith('Петля') and _near(p)]
         in_plane = [k for k in range(3) if k != nrm]
         if len(hinges) >= 1:
             hmn, hmx = bbox_of(hinges)

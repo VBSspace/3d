@@ -344,6 +344,13 @@ async function load() {
   const res = await fetch(new URL('model.json', base));
   if (!res.ok) throw new Error('model.json не найден');
   S.data = await res.json();
+  // фон страницы и яркость сцены — настройки проекта (model.json), по умолчанию как раньше
+  if (S.data.bgColor) {
+    BG_LIGHT.set(S.data.bgColor);
+    document.documentElement.style.setProperty('--bg', S.data.bgColor);
+    const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = S.data.bgColor;
+  }
+  if (S.data.exposure) renderer.toneMappingExposure = S.data.exposure;
   const draco = new DRACOLoader().setDecoderPath(DRACO_PATH);
   const loader = new GLTFLoader().setDRACOLoader(draco);
   const gltf = await new Promise((ok, fail) => loader.load(new URL('model.glb', base).href, ok,
@@ -410,7 +417,8 @@ function setup(root) {
   controls.minDistance = 0.15;
 
   enhanceMaterials(S.partMeshes, renderer);
-  S.room = buildRoom({ scene, renderer, roomMeshes: S.roomMeshes, parts: S.parts, MM });
+  applyMaterialAlias();
+  S.room = buildRoom({ scene, renderer, roomMeshes: S.roomMeshes, parts: S.parts, MM, wallColor: S.data.wallColor, floor: S.data.floor });
   if (S.room) floor.position.y -= 0.002;
   buildMovers();
   renderer.shadowMap.needsUpdate = true;
@@ -436,6 +444,19 @@ function setup(root) {
   setTimeout(() => $('#loader').remove(), 600);
   if (!store.get('bvs_hint_seen', false) || isTouch) showHint();
   initNotes();
+}
+
+// материал одного декора показать как другой (model.json materialAlias: {"tex:NCS…": "tex:U216"}) —
+// например, эмаль, подобранная в цвет ЛДСП
+function applyMaterialAlias() {
+  const al = S.data.materialAlias || {};
+  for (const [from, to] of Object.entries(al)) {
+    const target = findMaterial(to);
+    if (!target) continue;
+    S.root.traverse((o) => {
+      if (o.isMesh && o.userData.orig?.name === from) { o.material = target; o.userData.orig = target; }
+    });
+  }
 }
 
 function findMaterial(name) {

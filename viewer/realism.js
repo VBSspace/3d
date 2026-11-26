@@ -72,6 +72,58 @@ export function enhanceMaterials(meshes, renderer) {
 }
 
 // ------------------------------------------------------------------ комната
+/** Паркет «ёлочкой» (классическая, английская): доска 90×540 мм под 45°.
+ *  Текстура — квадрат √2·6·90 ≈ 763,7 мм, повторяется без швов. */
+const PQ_W = 90, PQ_N = 6;
+const PARQUET_MM = Math.SQRT2 * PQ_N * PQ_W;
+function parquetTexture(renderer, color) {
+  const N = 1024, c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d');
+  const base = new THREE.Color(color || '#bdae97');
+  const img = g.createImageData(N, N);
+  const s = PARQUET_MM / N / PQ_W;           // ширин доски на пиксель
+  const n = PQ_N;
+  const hash = (a, b, k) => { const h = Math.sin(a * 127.1 + b * 311.7 + k * 74.7) * 43758.5453; return h - Math.floor(h); };
+  // доска под точкой (u, v) в единицах ширины доски: [id строки, id доски, тип 0/1, позиция вдоль доски]
+  function plank(u, v) {
+    const cu = Math.floor(u);
+    let cv = Math.floor(v);
+    const j = Math.floor((cv - cu + n - 1) / (2 * n));
+    const vv = v - 2 * n * j; cv -= 2 * n * j;
+    if (cv - cu <= 0) return [j, cv, 0, u - cv];          // «горизонтальная» доска
+    return [j, cu, 1, vv - (cu + 1)];                      // «вертикальная» доска
+  }
+  const rawId = (x, y) => {                                 // доска под точкой (x, y в ширинах доски)
+    const [j, k, ty] = plank((x + y) / Math.SQRT2, (y - x) / Math.SQRT2);
+    return (j * 100003 + k) * 2 + ty;
+  };
+  for (let yy = 0; yy < N; yy++) {
+    for (let xx = 0; xx < N; xx++) {
+      const x = xx * s, y = yy * s;
+      const u = (x + y) / Math.SQRT2, v = (y - x) / Math.SQRT2;
+      const [j, k, ty, tpos] = plank(u, v);
+      const cls = (((k + n * j) % n) + n) % n;                 // доска с учётом повторения плитки
+      const tn = 0.92 + hash(cls, ty, 1) * 0.16;               // разнотон досок
+      const gr = 1 + 0.03 * Math.sin(tpos * 6.0 + hash(cls, ty, 5) * 30) + 0.015 * Math.sin(tpos * 1.7 + cls);
+      let kk = tn * gr;
+      const id = rawId(x, y);
+      if (rawId(x + 2 * s, y) !== id || rawId(x, y + 2 * s) !== id || rawId(x - s, y) !== id || rawId(x, y - s) !== id) kk *= 0.74;   // шов между досками (≈3 px — читается и издалека)
+      const o = (yy * N + xx) * 4;
+      img.data[o] = Math.min(255, base.r * 255 * kk);
+      img.data[o + 1] = Math.min(255, base.g * 255 * kk);
+      img.data[o + 2] = Math.min(255, base.b * 255 * kk);
+      img.data[o + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const tx = new THREE.CanvasTexture(c);
+  tx.colorSpace = THREE.SRGBColorSpace;
+  tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+  tx.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tx;
+}
+
 function tileTexture(renderer) {
   const c = document.createElement('canvas');
   c.width = c.height = 512;
@@ -101,9 +153,10 @@ function tileTexture(renderer) {
  * Делает комнату «как настоящую»: непрозрачные окрашенные стены, плиточный пол, потолочный свет.
  * Стена, которая оказывается между камерой и мебелью, прячется (как в планировщиках интерьера).
  */
-export function buildRoom({ scene, renderer, roomMeshes, parts, MM }) {
+export function buildRoom({ scene, renderer, roomMeshes, parts, MM, wallColor, floor: floorOpt }) {
   const walls = [];
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xeee9e2, roughness: 0.93, metalness: 0, side: THREE.DoubleSide });
+  // цвет стен — из model.json проекта (wallColor), по умолчанию светлый
+  const wallMat = new THREE.MeshStandardMaterial({ color: wallColor || 0xeee9e2, roughness: 0.93, metalness: 0, side: THREE.DoubleSide });
   for (const m of roomMeshes) {
     const info = parts.get(m.userData.pid);
     if (!info || info.kind !== 'wall') continue;
@@ -126,12 +179,14 @@ export function buildRoom({ scene, renderer, roomMeshes, parts, MM }) {
     w.inward = new THREE.Vector3();
     w.inward[ax] = Math.sign(center[ax] - c[ax]) || 1;
   }
-  // пол из плитки 600×600 в границах комнаты
+  // пол в границах комнаты: по умолчанию плитка 600×600, в проекте можно задать паркет «ёлочкой»
   const sx = rmax.x - rmin.x, sz = rmax.z - rmin.z;
-  const tex = tileTexture(renderer);
-  tex.repeat.set(sx / 0.6, sz / 0.6);
+  const parquet = floorOpt && floorOpt.type === 'herringbone';
+  const tex = parquet ? parquetTexture(renderer, floorOpt.color) : tileTexture(renderer);
+  const tile = parquet ? PARQUET_MM / 1000 : 0.6;
+  tex.repeat.set(sx / tile, sz / tile);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz),
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.42, metalness: 0, envMapIntensity: 0.7 }));
+    new THREE.MeshStandardMaterial({ map: tex, roughness: parquet ? 0.55 : 0.42, metalness: 0, envMapIntensity: parquet ? 0.5 : 0.7 }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(center.x, rmin.y + 0.0008, center.z);
   floor.receiveShadow = true;
