@@ -98,6 +98,7 @@ controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 // постобработка: мягкие тени в углах и стыках (если видеокарта не тянет — отключится сама)
 let post = null;
 try { post = createPost(renderer, scene, camera, { mobile: isTouch }); } catch (e) { console.warn('без постобработки', e); }
+if (post && new URLSearchParams(location.search).has('nocavity')) post.cavity.enabled = false;   // для сравнения
 function draw() { if (post) post.render(); else renderer.render(scene, camera); }
 
 // свет: основной — сверху-спереди со стороны камеры (тени от полок ложатся внутрь ячеек),

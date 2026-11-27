@@ -4,6 +4,67 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+// Тонкое затенение кромок (cavity): тёмная линия во внутренних углах, светлая — на рёбрах.
+// Нужно для мелкого рельефа (фрезеровка 3–5 мм), который большой GTAO не видит.
+// Берёт нормали и глубину из GTAOPass, поэтому работает только когда он включён.
+class CavityPass extends Pass {
+  constructor(ao, camera, { valley = 0.5, ridge = 0.3, radius = 1 } = {}) {
+    super();
+    this.ao = ao; this.camera = camera;
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: null }, tNormal: { value: null }, tDepth: { value: null },
+        texel: { value: new THREE.Vector2() }, radius: { value: radius },
+        cameraNear: { value: 0.1 }, cameraFar: { value: 100 },
+        valley: { value: valley }, ridge: { value: ridge },
+      },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `
+        #include <packing>
+        uniform sampler2D tDiffuse, tNormal, tDepth;
+        uniform vec2 texel; uniform float radius, cameraNear, cameraFar, valley, ridge;
+        varying vec2 vUv;
+        float rawD(vec2 uv) { return texture2D(tDepth, uv).x; }
+        float viewZ(float d) { return perspectiveDepthToViewZ(d, cameraNear, cameraFar); }
+        vec3 nrm(vec2 uv) { return texture2D(tNormal, uv).xyz * 2.0 - 1.0; }
+        // приращение нормали вдоль оси; 0, если соседи — другой предмет или фон
+        float axis(vec2 o, float z0, float tol, bool isX) {
+          vec2 a = vUv - o, b = vUv + o;
+          float da = rawD(a), db = rawD(b);
+          if (da >= 1.0 || db >= 1.0) return 0.0;
+          if (abs(viewZ(da) - z0) > tol || abs(viewZ(db) - z0) > tol) return 0.0;
+          vec3 na = nrm(a), nb = nrm(b);
+          return isX ? nb.x - na.x : nb.y - na.y;
+        }
+        void main() {
+          vec4 c = texture2D(tDiffuse, vUv);
+          float d0 = rawD(vUv);
+          if (d0 >= 1.0) { gl_FragColor = c; return; }
+          float z0 = viewZ(d0);
+          float tol = abs(z0) * 0.01 + 0.003;
+          float k = axis(vec2(texel.x * radius, 0.0), z0, tol, true) + axis(vec2(0.0, texel.y * radius), z0, tol, false);
+          float f = 1.0 - valley * clamp(-k, 0.0, 1.0) + ridge * clamp(k, 0.0, 1.0);
+          gl_FragColor = vec4(c.rgb * f, c.a);
+        }`,
+      depthTest: false, depthWrite: false,
+    });
+    this.fsQuad = new FullScreenQuad(this.material);
+  }
+  setSize(w, h) { this.material.uniforms.texel.value.set(1 / w, 1 / h); }
+  render(renderer, writeBuffer, readBuffer) {
+    this.needsSwap = this.ao.enabled;          // без GTAO нормали не обновляются — пропускаем
+    if (!this.ao.enabled) return;
+    const u = this.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    u.tNormal.value = this.ao.normalTexture;
+    u.tDepth.value = this.ao.depthTexture;
+    u.cameraNear.value = this.camera.near; u.cameraFar.value = this.camera.far;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.fsQuad.render(renderer);
+  }
+}
 
 // ------------------------------------------------------------------ постобработка
 export function createPost(renderer, scene, camera, { mobile }) {
@@ -20,9 +81,12 @@ export function createPost(renderer, scene, camera, { mobile }) {
     samples: mobile ? 8 : 16, distanceFallOff: 1.0, screenSpaceRadius: false });
   ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: mobile ? 6 : 8, rings: 2, samples: mobile ? 8 : 16 });
   composer.addPass(ao);
+  // линии кромок ~1 css-пиксель на любом экране
+  const cavity = new CavityPass(ao, camera, { radius: Math.min(2, Math.max(1, renderer.getPixelRatio())) });
+  composer.addPass(cavity);
   composer.addPass(new OutputPass());
   return {
-    composer, ao,
+    composer, ao, cavity,
     render() { composer.render(); },
     setSize(w, h) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(w, h); },
   };
