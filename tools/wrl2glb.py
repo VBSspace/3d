@@ -170,13 +170,26 @@ def build_primitive(T, Minv, uvinfo, crease_deg=35.0):
     key = np.round(P * 100).astype(np.int64)
     _, pid = np.unique(key, axis=0, return_inverse=True)
     pid = pid.reshape(-1)
-    acc = np.zeros((pid.max() + 1, 3))
-    np.add.at(acc, pid, np.repeat(n, 3, axis=0))   # взвешено площадью
-    sn = acc[pid]
-    sn /= np.maximum(np.linalg.norm(sn, axis=1, keepdims=True), 1e-12)
-    cf = np.repeat(fn, 3, axis=0)
-    use_s = (sn * cf).sum(1) > math.cos(math.radians(crease_deg))
-    N = np.where(use_s[:, None], sn, cf)
+    # Сглаживание только между гранями, близкими по направлению (угол < crease_deg).
+    # Раньше в точке складывались все грани — стенки фрезеровки наклоняли нормаль
+    # лицевой плоскости, и на фасаде шли косые полосы света.
+    cf = np.repeat(fn, 3, axis=0)                  # нормаль своей грани у каждого угла
+    nw = np.repeat(n, 3, axis=0)                   # нормаль, взвешенная площадью
+    cosc = math.cos(math.radians(crease_deg))
+    acc = nw.copy()
+    order = np.argsort(pid, kind='stable')
+    sp = pid[order]
+    d = 1
+    while d < len(order):
+        same = sp[d:] == sp[:-d]
+        if not same.any():
+            break
+        i, j = order[:-d][same], order[d:][same]
+        ok = (cf[i] * cf[j]).sum(1) > cosc
+        np.add.at(acc, i[ok], nw[j[ok]])
+        np.add.at(acc, j[ok], nw[i[ok]])
+        d += 1
+    N = acc / np.maximum(np.linalg.norm(acc, axis=1, keepdims=True), 1e-12)
     UV = None
     if uvinfo is not None:
         W, H, grain = uvinfo
